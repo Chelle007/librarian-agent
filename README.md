@@ -19,6 +19,7 @@ Done:
 
 - [x] `librarian/store/schema.py` — `schema.json` loader + validator (schema-on-read, fallback bucket)
 - [x] `librarian/store/vault_io.py` — direct markdown+frontmatter I/O, `.raw/` write-through, `.trash/` soft-delete
+- [x] `librarian/store/metadata_store.py` — SQLite index (type/tags/dates) + structured query + `corrections` table
 
 ## Layout
 
