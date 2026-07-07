@@ -1,0 +1,15 @@
+# Python
+__pycache__/
+*.py[cod]
+.venv/
+venv/
+*.egg-info/
+.pytest_cache/
+
+# Local index (derived, rebuildable — not the source of truth)
+*.sqlite
+*.sqlite3
+*.db
+
+# OS
+.DS_Store

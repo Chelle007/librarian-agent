@@ -1,0 +1,29 @@
+{
+  "base_required": ["type", "created_date"],
+  "types": {
+    "note": {
+      "folder": "notes/",
+      "optional": ["tags"]
+    },
+    "contact": {
+      "folder": "contacts/",
+      "required": ["name"],
+      "optional": ["birthday", "likes", "socials", "tags"]
+    },
+    "task": {
+      "folder": "tasks/",
+      "required": ["due_date"],
+      "optional": ["status", "tags"]
+    },
+    "habit": {
+      "folder": "habits/",
+      "required": ["name", "frequency"],
+      "optional": ["tags", "snooze_duration", "last_completed", "current_streak", "longest_streak", "completions_total", "completions_on_time"]
+    },
+    "brief": {
+      "folder": "inbox/",
+      "optional": []
+    }
+  },
+  "fallback_type": "note"
+}

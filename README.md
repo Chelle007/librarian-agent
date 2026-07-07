@@ -1,0 +1,40 @@
+# Librarian Agent
+
+Personal AI assistant with a two-agent design: a thin **PA Agent** (Telegram,
+conversation, reminders) and a custom **Librarian Agent** (an MCP server that
+owns the entire Obsidian vault — retrieval, schema enforcement, and writes).
+
+See the design docs in `docs/`:
+
+- `docs/Project Description.md` — goals, use cases, decisions
+- `docs/Architecture (7 July).md` — full system architecture and rationale
+- `docs/Build_Plan (Jul 6).md` — staged build plan
+
+## Status
+
+**Stage 1 — Librarian Baseline** (in progress). Vault I/O, schema validation,
+metadata store, structured queries, CLI harness. **No LLM involved.**
+
+Done:
+
+- [x] `store/schema.py` — `schema.json` loader + validator (schema-on-read, fallback bucket)
+
+## Layout
+
+```
+store/       # vault I/O, schema, metadata + vector stores
+retrieval/   # exact / semantic / hybrid retrieval (Stage 2)
+ingestion/   # chunking (Stage 2)
+llm/         # Gemini client (Stage 2+)
+tests/       # pytest suite
+vault/       # the Obsidian vault (schema.json lives in vault/system/)
+```
+
+## Setup
+
+```bash
+python3 -m venv .venv
+source .venv/bin/activate
+pip install -r requirements.txt
+pytest
+```

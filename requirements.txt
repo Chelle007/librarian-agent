@@ -1,0 +1,4 @@
+# Stage 1 — Librarian Baseline (no LLM)
+pydantic>=2.7,<3.0          # schema.json modeling + validation
+python-frontmatter>=1.1,<2  # read/write markdown + YAML frontmatter (vault_io)
+pytest>=8.0,<9.0            # test harness
