@@ -10,7 +10,7 @@ Building a personal AI assistant using Hermes Agent + Obsidian as the knowledge 
 **Stack**
 - Agent framework: Hermes Agent (by Nous Research, open-source, self-improving)
 - LLM: Gemini Flash (model-agnostic via Hermes, swap anytime)
-- Knowledge base: Obsidian (markdown vault, connected via Local REST API plugin + MCP)
+- Knowledge base: Obsidian (markdown vault; Librarian reads/writes files directly on disk, no REST API — Obsidian is an optional GUI viewer, synced desktop↔VPS via git)
 - Interface: Telegram bot (primary)
 - Voice: Telegram voice message → transcribed → handled as text input
 - Hosting: Hetzner CX22 VPS (~$4.59/mo, no lock-in)
@@ -53,13 +53,13 @@ Building a personal AI assistant using Hermes Agent + Obsidian as the knowledge 
 - Quiz platform: Telegram only for now
 - LLM: Gemini Flash (convenience + quality over privacy)
 - VPS: Hetzner CX22 over Hostinger (flat pricing, no lock-in, same specs)
-- Obsidian integration: Local REST API plugin + MCP
+- Obsidian integration: direct file I/O on the markdown vault + git sync (superseded earlier Local REST API + MCP plan — no live Obsidian instance on the headless VPS to talk to)
  
 **Next Steps**
 - [ ] Design system architecture
 - [ ] Set up Hetzner VPS
 - [ ] Install Hermes Agent
 - [ ] Connect Gemini Flash as LLM
-- [ ] Connect Obsidian via Local REST API + MCP
+- [ ] Point Librarian at the vault folder (direct file I/O) + set up git sync
 - [ ] Connect Telegram bot
 - [ ] Build features one by one starting from core

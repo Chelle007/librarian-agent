@@ -4,7 +4,7 @@ from __future__ import annotations
 
 import pytest
 
-from store.schema import Schema, SchemaError, ValidationResult
+from librarian.store.schema import Schema, SchemaError, ValidationResult
 
 
 @pytest.fixture(scope="module")

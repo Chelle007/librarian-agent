@@ -17,18 +17,25 @@ metadata store, structured queries, CLI harness. **No LLM involved.**
 
 Done:
 
-- [x] `store/schema.py` — `schema.json` loader + validator (schema-on-read, fallback bucket)
+- [x] `librarian/store/schema.py` — `schema.json` loader + validator (schema-on-read, fallback bucket)
+- [x] `librarian/store/vault_io.py` — direct markdown+frontmatter I/O, `.raw/` write-through, `.trash/` soft-delete
 
 ## Layout
 
 ```
-store/       # vault I/O, schema, metadata + vector stores
-retrieval/   # exact / semantic / hybrid retrieval (Stage 2)
-ingestion/   # chunking (Stage 2)
-llm/         # Gemini client (Stage 2+)
-tests/       # pytest suite
-vault/       # the Obsidian vault (schema.json lives in vault/system/)
+librarian/           # the Librarian agent package
+├── store/           # vault I/O, schema, metadata + vector stores
+├── retrieval/       # exact / semantic / hybrid retrieval (Stage 2)
+├── ingestion/       # chunking (Stage 2)
+└── llm/             # Gemini client (Stage 2+)
+pa/                  # PA-side glue (Stage 3, Hermes)
+tests/               # pytest suite
+vault/               # the Obsidian vault (schema.json lives in vault/system/)
 ```
+
+The Librarian reads/writes the `vault/` markdown files **directly on disk** — no
+running Obsidian instance or REST API required. Obsidian is just an optional GUI
+viewer pointed at the same folder; desktop and VPS stay in sync via git.
 
 ## Setup
 

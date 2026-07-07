@@ -17,7 +17,9 @@ from pathlib import Path
 from pydantic import BaseModel, Field
 
 # Default location: schema.json lives inside the vault so it travels with it.
-DEFAULT_SCHEMA_PATH = Path(__file__).resolve().parent.parent / "vault" / "system" / "schema.json"
+# schema.py is at librarian/store/schema.py, so the repo root is parents[2].
+_REPO_ROOT = Path(__file__).resolve().parents[2]
+DEFAULT_SCHEMA_PATH = _REPO_ROOT / "vault" / "system" / "schema.json"
 
 
 class SchemaError(Exception):
