@@ -125,6 +125,14 @@ class VaultIO:
         return dest
 
     # --------------------------------------------------------------- helpers
+    def resolve(self, path: str | Path) -> Path:
+        """Public: resolve an absolute/vault-relative path, guarded to the vault."""
+        return self._resolve_inside(path)
+
+    def relpath(self, path: str | Path) -> str:
+        """Vault-relative POSIX path — the stable id used by the metadata store."""
+        return self._resolve_inside(path).relative_to(self.root).as_posix()
+
     def _dump(self, path: Path, meta: dict, body: str) -> None:
         post = frontmatter.Post(body, **meta)
         path.write_text(frontmatter.dumps(post) + "\n", encoding="utf-8")
