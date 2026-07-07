@@ -22,7 +22,8 @@ Done:
 - [x] `librarian/store/metadata_store.py` — SQLite index (type/tags/dates) + structured query + `corrections` table
 - [x] `librarian/store/git_sync.py` — commit-on-write helper (no-op if vault isn't a git repo)
 - [x] `librarian/pipeline.py` — write pipeline: build → validate → route → archive raw → write → index → commit; create/update/delete/query_raw
-- [x] `librarian/cli.py` — CLI harness (`python -m librarian.cli create|update|query|delete`)
+- [x] `librarian/cli.py` — CLI harness (`python -m librarian.cli init|create|update|query|delete`)
+- [x] `librarian/vault_init.py` — one-command vault scaffolding, seeded from the schema template
 - [x] end-to-end smoke test (create each type, fallback bucket, query, soft-delete, CLI)
 
 ## Layout
@@ -32,15 +33,26 @@ librarian/           # the Librarian agent package
 ├── store/           # vault I/O, schema, metadata + vector stores
 ├── retrieval/       # exact / semantic / hybrid retrieval (Stage 2)
 ├── ingestion/       # chunking (Stage 2)
-└── llm/             # Gemini client (Stage 2+)
+├── llm/             # Gemini client (Stage 2+)
+├── templates/       # schema.json template (seeds new vaults)
+└── vault_init.py    # vault scaffolding
 pa/                  # PA-side glue (Stage 3, Hermes)
 tests/               # pytest suite
-vault/               # the Obsidian vault (schema.json lives in vault/system/)
 ```
 
-The Librarian reads/writes the `vault/` markdown files **directly on disk** — no
+The Librarian reads/writes the vault's markdown files **directly on disk** — no
 running Obsidian instance or REST API required. Obsidian is just an optional GUI
 viewer pointed at the same folder; desktop and VPS stay in sync via git.
+
+## The vault is a separate repo
+
+The vault holds **personal data** and is intentionally **not** part of this code
+repo (`/vault/` is gitignored). Keep it as its own git repo so it can sync with
+desktop Obsidian (obsidian-git) independently of the code.
+
+`schema.json` ships as a template in `librarian/templates/` and is copied into
+`<vault>/system/schema.json` on init; the runtime reads the vault's live copy so
+it can evolve per-vault, falling back to the template if absent.
 
 ## Setup
 
@@ -49,6 +61,10 @@ python3 -m venv .venv
 source .venv/bin/activate
 pip install -r requirements.txt
 pytest
+
+# create a vault (defaults to ./vault; use --vault to put it elsewhere)
+python -m librarian.cli init
+python -m librarian.cli --vault /path/to/vault init
 ```
 
 ## CLI harness

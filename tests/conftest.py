@@ -5,17 +5,14 @@ from __future__ import annotations
 import pytest
 
 from librarian.pipeline import Librarian
-from librarian.store.schema import DEFAULT_SCHEMA_PATH
+from librarian.vault_init import init_vault
 
 
 @pytest.fixture
 def temp_vault(tmp_path):
-    """A scratch vault dir with the real schema copied into vault/system/."""
+    """A scratch vault initialized from the packaged schema template."""
     vault = tmp_path / "vault"
-    (vault / "system").mkdir(parents=True)
-    (vault / "system" / "schema.json").write_text(
-        DEFAULT_SCHEMA_PATH.read_text(encoding="utf-8"), encoding="utf-8"
-    )
+    init_vault(vault)
     return vault
 
 

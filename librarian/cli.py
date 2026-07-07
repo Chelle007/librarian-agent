@@ -18,6 +18,8 @@ import json
 import sys
 
 from librarian.pipeline import Librarian
+from librarian.store.vault_io import DEFAULT_VAULT_ROOT
+from librarian.vault_init import init_vault
 
 
 def _parse_fields(pairs: list[str] | None) -> dict:
@@ -38,6 +40,8 @@ def _build_parser() -> argparse.ArgumentParser:
     p.add_argument("--git", action="store_true", help="commit each write to git")
 
     sub = p.add_subparsers(dest="command", required=True)
+
+    sub.add_parser("init", help="create the vault folder structure + seed schema.json")
 
     c = sub.add_parser("create", help="create a note")
     c.add_argument("--type", required=True)
@@ -70,6 +74,12 @@ def _build_parser() -> argparse.ArgumentParser:
 
 def main(argv: list[str] | None = None) -> int:
     args = _build_parser().parse_args(argv)
+
+    # init doesn't need (and can't assume) an existing vault/schema.
+    if args.command == "init":
+        root = init_vault(args.vault or DEFAULT_VAULT_ROOT)
+        print(f"initialized vault at {root}")
+        return 0
 
     lib = Librarian(
         vault_root=args.vault,

@@ -16,10 +16,25 @@ from pathlib import Path
 
 from pydantic import BaseModel, Field
 
-# Default location: schema.json lives inside the vault so it travels with it.
-# schema.py is at librarian/store/schema.py, so the repo root is parents[2].
+# schema.py is at librarian/store/schema.py:
+#   parents[1] = librarian/ (the package), parents[2] = repo root.
+_PACKAGE_ROOT = Path(__file__).resolve().parents[1]
 _REPO_ROOT = Path(__file__).resolve().parents[2]
-DEFAULT_SCHEMA_PATH = _REPO_ROOT / "vault" / "system" / "schema.json"
+
+# The canonical template ships with the code and seeds new vaults / backs tests.
+TEMPLATE_SCHEMA_PATH = _PACKAGE_ROOT / "templates" / "schema.json"
+
+# The live copy travels with the vault so it can evolve per-vault. Runtime reads
+# this when present, falling back to the template (e.g. a fresh clone with no vault).
+DEFAULT_VAULT_SCHEMA_PATH = _REPO_ROOT / "vault" / "system" / "schema.json"
+
+
+def _default_schema_path() -> Path:
+    return (
+        DEFAULT_VAULT_SCHEMA_PATH
+        if DEFAULT_VAULT_SCHEMA_PATH.is_file()
+        else TEMPLATE_SCHEMA_PATH
+    )
 
 
 class SchemaError(Exception):
@@ -43,8 +58,12 @@ class Schema(BaseModel):
 
     @classmethod
     def load(cls, path: str | Path | None = None) -> "Schema":
-        """Load and validate schema.json from disk."""
-        path = Path(path) if path is not None else DEFAULT_SCHEMA_PATH
+        """Load and validate schema.json from disk.
+
+        With no explicit path: use the vault's live copy if it exists, else the
+        packaged template.
+        """
+        path = Path(path) if path is not None else _default_schema_path()
         try:
             raw = json.loads(path.read_text(encoding="utf-8"))
         except FileNotFoundError as exc:
