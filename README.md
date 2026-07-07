@@ -44,10 +44,19 @@ The Librarian reads/writes the vault's markdown files **directly on disk** — n
 running Obsidian instance or REST API required. Obsidian is just an optional GUI
 viewer pointed at the same folder; desktop and VPS stay in sync via git.
 
-## The vault is a separate repo
+## The vault is a separate repo (a sibling folder)
 
 The vault holds **personal data** and is intentionally **not** part of this code
-repo (`/vault/` is gitignored). Keep it as its own git repo so it can sync with
+repo. It lives *outside* it — by default as a sibling folder:
+
+```
+librarian agent/
+├── librarian-agent/      # this code repo
+└── vault/                # your data — its own git repo
+```
+
+Resolution order for the vault location: `--vault` flag → `LIBRARIAN_VAULT` env
+var → sibling `../vault`. Keep the vault as its own git repo so it can sync with
 desktop Obsidian (obsidian-git) independently of the code.
 
 `schema.json` ships as a template in `librarian/templates/` and is copied into
@@ -62,9 +71,11 @@ source .venv/bin/activate
 pip install -r requirements.txt
 pytest
 
-# create a vault (defaults to ./vault; use --vault to put it elsewhere)
+# create the vault (defaults to the sibling ../vault)
 python -m librarian.cli init
+# ...or put it anywhere
 python -m librarian.cli --vault /path/to/vault init
+export LIBRARIAN_VAULT=/path/to/vault   # so you can skip --vault afterwards
 ```
 
 ## CLI harness

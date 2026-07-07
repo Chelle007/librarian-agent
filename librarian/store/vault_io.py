@@ -16,6 +16,7 @@ this module takes an explicit destination folder and just does the I/O.
 
 from __future__ import annotations
 
+import os
 import re
 from dataclasses import dataclass, field
 from datetime import datetime, timezone
@@ -24,10 +25,26 @@ from pathlib import Path
 import frontmatter
 
 _REPO_ROOT = Path(__file__).resolve().parents[2]
-DEFAULT_VAULT_ROOT = _REPO_ROOT / "vault"
 
 RAW_DIR = ".raw"
 TRASH_DIR = ".trash"
+
+
+def default_vault_root() -> Path:
+    """Where the vault lives when not given explicitly.
+
+    The vault is a separate repo from this code, so by default it sits as a
+    *sibling* of the code repo (e.g. `.../librarian agent/vault`). Override with
+    the LIBRARIAN_VAULT env var or a `--vault` flag / `vault_root=` argument.
+    """
+    env = os.environ.get("LIBRARIAN_VAULT")
+    if env:
+        return Path(env).expanduser()
+    return _REPO_ROOT.parent / "vault"
+
+
+# Backwards-compatible alias; resolved at import time.
+DEFAULT_VAULT_ROOT = default_vault_root()
 
 
 class VaultIOError(Exception):
@@ -45,7 +62,8 @@ class Note:
 
 class VaultIO:
     def __init__(self, vault_root: str | Path | None = None):
-        self.root = Path(vault_root).resolve() if vault_root else DEFAULT_VAULT_ROOT.resolve()
+        root = vault_root if vault_root is not None else default_vault_root()
+        self.root = Path(root).resolve()
 
     # ------------------------------------------------------------------ read
     def read(self, path: str | Path) -> Note:

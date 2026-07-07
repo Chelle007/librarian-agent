@@ -16,25 +16,23 @@ from pathlib import Path
 
 from pydantic import BaseModel, Field
 
-# schema.py is at librarian/store/schema.py:
-#   parents[1] = librarian/ (the package), parents[2] = repo root.
+from librarian.store.vault_io import default_vault_root
+
+# schema.py is at librarian/store/schema.py, parents[1] = librarian/ (package).
 _PACKAGE_ROOT = Path(__file__).resolve().parents[1]
-_REPO_ROOT = Path(__file__).resolve().parents[2]
 
 # The canonical template ships with the code and seeds new vaults / backs tests.
 TEMPLATE_SCHEMA_PATH = _PACKAGE_ROOT / "templates" / "schema.json"
 
-# The live copy travels with the vault so it can evolve per-vault. Runtime reads
-# this when present, falling back to the template (e.g. a fresh clone with no vault).
-DEFAULT_VAULT_SCHEMA_PATH = _REPO_ROOT / "vault" / "system" / "schema.json"
-
 
 def _default_schema_path() -> Path:
-    return (
-        DEFAULT_VAULT_SCHEMA_PATH
-        if DEFAULT_VAULT_SCHEMA_PATH.is_file()
-        else TEMPLATE_SCHEMA_PATH
-    )
+    """The vault's live schema if present, else the packaged template.
+
+    Lets schema.json evolve per-vault while keeping the code repo self-contained
+    (a fresh clone with no vault still validates against the template).
+    """
+    vault_schema = default_vault_root() / "system" / "schema.json"
+    return vault_schema if vault_schema.is_file() else TEMPLATE_SCHEMA_PATH
 
 
 class SchemaError(Exception):

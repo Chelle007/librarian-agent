@@ -18,7 +18,7 @@ import json
 import sys
 
 from librarian.pipeline import Librarian
-from librarian.store.vault_io import DEFAULT_VAULT_ROOT
+from librarian.store.vault_io import default_vault_root
 from librarian.vault_init import init_vault
 
 
@@ -77,7 +77,7 @@ def main(argv: list[str] | None = None) -> int:
 
     # init doesn't need (and can't assume) an existing vault/schema.
     if args.command == "init":
-        root = init_vault(args.vault or DEFAULT_VAULT_ROOT)
+        root = init_vault(args.vault or default_vault_root())
         print(f"initialized vault at {root}")
         return 0
 
