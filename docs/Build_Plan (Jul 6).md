@@ -77,6 +77,7 @@ Hermes PA profile, Telegram gateway, Librarian wired in as an MCP server. Depend
 - [ ] Hermes profile setup, Gemini Flash connected, built-in memory (default — Honcho deferred, config-only upgrade if revisited)
 - [ ] Telegram gateway
 - [ ] Core reminders (PA-only, no vault) — one-off, recurring, birthday feed-in
+- [ ] Habits — interval-based recurring reminder + snooze loop (PA-side: `frequency` drives the interval, "later" snoozes by `snooze_duration`, re-fires until done or next interval). On "done", update the habit note's stats via the Librarian (`completions_total`/`completions_on_time`, `current_streak`/`longest_streak`, `last_completed`). **Finalize the "on time" definition here** (deferred from design — leading candidate: on-time = done on the first reminder of the interval, no snooze). Habit *definition + stats storage* already works via the generic Stage 1 write pipeline; this item is only the PA reminder loop + the stat-increment logic.
 - [ ] Vault-related routing — binary classify (vault-related or not) + PA-side message splitting for mixed intents (e.g. reminder + vault save in one message)
 - [ ] Wire `librarian_handle` as MCP tool call, including `needs_clarification` multi-turn loop
 - [ ] Wire `librarian_query_raw` for system-triggered reads (birthday cron, quiz batch-fetch)
