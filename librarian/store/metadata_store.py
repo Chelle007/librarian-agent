@@ -88,6 +88,35 @@ class MetadataStore:
         self._conn.execute("DELETE FROM notes WHERE path = ?", (path,))
         self._conn.commit()
 
+    def replace_notes(self, rows: list[dict]) -> None:
+        """Atomically rebuild the entire `notes` table from `rows`.
+
+        Backs `reindex`: the index is a derived cache, so it can be dropped and
+        rebuilt wholesale from the vault markdown (source of truth). Wrapped in a
+        single transaction so a crash never leaves a half-rebuilt index. Only the
+        `notes` table is touched — `corrections` (real signal, not derived) is
+        left intact.
+        """
+        params = [
+            {
+                "path": r["path"],
+                "type": r["type"],
+                "tags": json.dumps(r.get("tags") or []),
+                "created_date": r.get("created_date"),
+                "last_modified": r.get("last_modified") or _now_iso(),
+            }
+            for r in rows
+        ]
+        with self._conn:  # implicit transaction: commit on success, rollback on error
+            self._conn.execute("DELETE FROM notes")
+            self._conn.executemany(
+                """
+                INSERT INTO notes (path, type, tags, created_date, last_modified)
+                VALUES (:path, :type, :tags, :created_date, :last_modified)
+                """,
+                params,
+            )
+
     def rename(self, old_path: str, new_path: str) -> None:
         self._conn.execute(
             "UPDATE notes SET path = ? WHERE path = ?", (new_path, old_path)

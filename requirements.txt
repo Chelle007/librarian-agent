@@ -2,3 +2,7 @@
 pydantic>=2.7,<3.0          # schema.json modeling + validation
 python-frontmatter>=1.1,<2  # read/write markdown + YAML frontmatter (vault_io)
 pytest>=8.0,<9.0            # test harness
+
+# Stage 2 — Retrieval (vectors + LLM)
+sqlite-vec==0.1.9           # vector store (vec0); pre-v1, pin exactly (breaking changes expected)
+google-genai>=1.0,<2        # Gemini embeddings + generation (lazy-imported; only needed for the real embedder)

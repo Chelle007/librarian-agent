@@ -37,7 +37,9 @@ This document folds in decisions made during the Librarian architecture design s
 
 The PA needs no knowledge of vault internals — it only needs to recognize "this is vault-related" and forward the raw request. Isolating the vault's retrieval logic, schema, and write behavior in a separate service keeps PA's context small, and lets the Librarian be built, tested, and evaluated entirely independently of Hermes.
 
-**North star: token efficiency > accuracy > latency.**
+**North star: code sustainability > accuracy = token efficiency = latency.**
+
+Code sustainability leads because this is a portfolio piece and a tool the author must maintain solo over time — clean, readable, testable, deterministic-where-possible code that a reviewer can follow is worth more than shaving tokens or milliseconds. Accuracy, token efficiency, and latency then rank equally: at ~10 requests/day on Gemini Flash the dollar cost is negligible, so token efficiency is pursued as a *design discipline and portfolio narrative* (see the A/B benchmark), not as an optimization that should ever be traded against correctness or clean code.
 
 ### Agent 1 — PA Agent (Hermes)
 
@@ -235,7 +237,9 @@ Three adjacent approaches were considered for building the Librarian (and, by ex
 
 ## Data Layer
 
-Unchanged — two SQLite-backed stores: vector store (sqlite-vec, embeddings per note/chunk) and metadata store (plain SQLite table: type, created_date, last_modified, tags, path). Vault markdown+frontmatter remains source of truth; the index is a derived, rebuildable cache.
+Unchanged — two SQLite-backed stores: vector store (sqlite-vec, embeddings per note/chunk) and metadata store (plain SQLite table: type, created_date, last_modified, tags, path). Vault markdown+frontmatter remains source of truth; the index is a derived, rebuildable cache (rebuilt via `librarian.cli reindex`).
+
+**Embedding + chunking locked (see `Embedding & Chunking Decision (Jul 7).md`):** `gemini-embedding-2` (multimodal) at 768 dims (Matryoshka-truncated, L2-normalized), asymmetric retrieval via text prefixes (`-2` has no `task_type` field), `sqlite-vec` `vec0` float32 brute-force KNN. The vector store is **chunk-native** — a whole note is just a 1-chunk note — so a future chunking-policy change is a re-embed only, never a schema migration. **Why `-2` over `-001`:** an embedding model defines a vector space, so putting text and future image embeddings in the *same* multimodal space is the only way cross-modal retrieval works later — starting on `-2` avoids a forced full re-embed the day images are added. Bonus: 8192-token input (less chunking), auto-normalization. `-001` is retained in the embed helper as a text-only A/B fallback. Rationale for API-over-local: no new privacy exposure (content already transits Gemini), zero ML infra on the 4 GB VPS, negligible cost — consistent with the code-sustainability north star.
 
 ---
 
@@ -271,6 +275,8 @@ Hermes ships built-in cross-session memory (MEMORY.md/USER.md) with no extra set
 ## Ebbinghaus Memory Decay
 
 Unchanged from original design. Strength decays over time, grows with access; tiers `core → active → warm → cold → archive`; daily decay tick owned by Librarian's internal cron. Cold/archived high-volume content (e.g. future diary entries) can be periodically rolled up into summaries.
+
+**Scope guard (added):** a *second brain's* core value is that it never silently forgets — so decay must never remove a note from the retrieval candidate set or hide it from a query. Decay only affects (1) **rollup/summarization** of high-volume cold content and (2) **ranking tie-breaks** among already-retrieved candidates. A 6-month-old note is always still findable; decay can lower where it sorts, never whether it appears. This keeps decay from turning into a recall regression.
 
 **Prior art note:** `agent-second-brain`'s `autograph` memory layer independently converged on the same decay formula shape and same five-tier naming — worth citing explicitly as validating prior art in any writeup, not coincidence.
 

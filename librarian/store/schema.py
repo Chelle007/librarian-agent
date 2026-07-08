@@ -17,6 +17,7 @@ from pathlib import Path
 from pydantic import BaseModel, Field
 
 from librarian.store.vault_io import default_vault_root
+from librarian.vault_folders import SYSTEM_FOLDER
 
 # schema.py is at librarian/store/schema.py, parents[1] = librarian/ (package).
 _PACKAGE_ROOT = Path(__file__).resolve().parents[1]
@@ -31,7 +32,9 @@ def _default_schema_path() -> Path:
     Lets schema.json evolve per-vault while keeping the code repo self-contained
     (a fresh clone with no vault still validates against the template).
     """
-    vault_schema = default_vault_root() / "system" / "schema.json"
+    vault_schema = default_vault_root() / SYSTEM_FOLDER / "schema.json"
+    if not vault_schema.is_file():
+        vault_schema = default_vault_root() / "system" / "schema.json"
     return vault_schema if vault_schema.is_file() else TEMPLATE_SCHEMA_PATH
 
 

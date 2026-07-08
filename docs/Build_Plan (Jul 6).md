@@ -6,79 +6,100 @@
 
 ---
 
-## Stage 1 — Librarian Baseline
+## Guiding principles (read first)
+
+- **North star:** code sustainability > accuracy = token efficiency = latency. Clean, testable, deterministic-where-possible code beats micro-optimizations. Token efficiency is a design discipline + portfolio narrative (the A/B benchmark), never traded against correctness.
+- **Librarian-first is deliberate.** The Librarian is the portfolio/resume centerpiece, so it's built and proven in isolation *before* the PA. The PA (Telegram, reminders) is intentionally last even though reminders are the #1 daily-use case — the resume story lives in the Librarian's retrieval/eval/benchmark engineering, not the bot glue.
+- **Scope discipline — two tiers.** Every item is either **[CORE]** (must ship for the portfolio piece to be complete and demoable) or **[v2 — needs real data]** (designed and documented now, but *not* built for submission because it can't be validated without months of real usage). Don't let v2 items block core. The design write-up covers them either way — designing + honestly deferring is itself good resume material.
+
+---
+
+## Stage 1 — Librarian Baseline  ✅ (essentially done)
 
 Vault I/O, schema validation, metadata store, structured queries, CLI test harness. No LLM involved. Goal: working, demoable vertical slice, submittable as a portfolio checkpoint.
 
-- [ ] Vault I/O module (`store/vault_io.py`) — read/write markdown + frontmatter
-- [ ] `.raw/` immutable write-through on every ingest (date-archived)
-- [ ] `schema.json` loader + validator (`store/schema.py`)
-- [ ] Metadata store (`store/metadata_store.py`) — SQLite table: type, path, tags, created_date, last_modified
-- [ ] Write pipeline: frontmatter build → schema validate → file write → metadata upsert → git commit/push
-- [ ] Folder routing by `type` (deterministic, no LLM)
-- [ ] Generic fallback bucket (`notes/`, `type: note`) for unmatched content
-- [ ] `.trash/` soft-delete mechanism (move, not `rm`) — even without full delete-intent classification yet, build the primitive now
-- [ ] CLI test harness — manual create/update/query/delete calls against the pipeline directly
-- [ ] `librarian_query_raw(filter)` as a real tool (not just dev harness) — structured filter, no LLM
-- [ ] 5–8 case smoke test covering: create (each type), fallback-bucket create, structured query, soft-delete
-- [ ] `corrections` table in metadata store (`original_classification, corrected_to, note_id, timestamp`) — log every revert-via-reply event; signal is lost if not captured at the moment it happens, so this can't wait for Stage 2
+- [x] Vault I/O module (`store/vault_io.py`) — read/write markdown + frontmatter
+- [x] `.raw/` immutable write-through on every ingest (date-archived)
+- [x] `schema.json` loader + validator (`store/schema.py`)
+- [x] Metadata store (`store/metadata_store.py`) — SQLite table: type, path, tags, created_date, last_modified
+- [x] Write pipeline: frontmatter build → schema validate → file write → metadata upsert → git commit **+ push**
+- [x] Folder routing by `type` (deterministic, no LLM)
+- [x] Generic fallback bucket (`notes/`, `type: note`) for unmatched content
+- [x] `.trash/` soft-delete mechanism (move, not `rm`)
+- [x] CLI test harness — manual create/update/query/delete calls against the pipeline directly
+- [x] `librarian_query_raw(filter)` as a real tool (not just dev harness) — structured filter, no LLM
+- [x] end-to-end smoke test (create each type, fallback bucket, query, soft-delete, CLI)
+- [x] `corrections` table in metadata store — log every revert-via-reply event; signal is lost if not captured at the moment it happens, so it can't wait for Stage 2
+
+**Remaining Stage 1 polish:**
+- [x] Index reconcile/rebuild command (`reindex`) — rebuilds the SQLite `notes` table from the vault markdown (source of truth), atomically; reconciles external edits (desktop Obsidian / git pull). Skips `.raw/`/`.trash/`/`system/`, resolves unknown types to fallback, preserves the `corrections` table.
 
 **Explicitly not in Stage 1:** any LLM call, vector store, classification, RAG.
 
 ---
 
-## Stage 2 — Librarian Eval
+## Stage 2 — Librarian Eval (the portfolio centerpiece)
 
-Full retrieval stack, intent classification, confidence scoring, RAG, dedup, groundedness, eval harness. Complete when the Librarian is independently solid and proven correct — PA depends on this being done first.
+Full retrieval stack, intent classification, confidence scoring, RAG, groundedness, eval harness. Complete when the Librarian is independently solid and proven correct — PA depends on this being done first.
 
-### Retrieval
-- [ ] Vector store (`store/vector_store.py`, sqlite-vec) — embeddings per note/chunk
-- [ ] Chunking strategy per note type (`ingestion/chunker.py`) — **lock embedding model + chunking strategy before building this**, changing either later requires re-embedding everything
-- [ ] `exact_lookup` module (`retrieval/exact_lookup.py`) — merged keyword + structured, no LLM, template-based response
-- [ ] `semantic` module (`retrieval/semantic.py`) — vector search + RAG generation
-- [ ] `hybrid` module (`retrieval/hybrid.py`) — metadata filter narrows candidates, vector search within set, + temporal expression extraction/date-range filter, + RAG generation
-- [ ] Aggregation sub-flag on `exact_lookup` — dual-check (strict count + tag scan) + discrepancy surfacing (treat as polish, can ship after core paths work)
+**Lock before building:** embedding model + chunking strategy — ✅ **DECIDED**, see `Embedding & Chunking Decision (Jul 7).md`. Summary: `gemini-embedding-2` (multimodal, one vector space for future image embedding; 8192-token input) @ 768-d (L2-normalized), prefix-based asymmetric retrieval (no `task_type` field), `sqlite-vec` `vec0` float32 brute-force KNN, chunk-native schema (whole-note = 1 chunk), Policy v1 = structured types whole-note / freeform split only above ~1000 tokens. (`-001` kept as an A/B fallback in the embed helper.)
 
-### Classification & routing
-- [ ] Rule-based pre-filter for unambiguous creates (skip LLM entirely)
-- [ ] Combined LLM classification call — intent + retrieval mode, one call (`classifier.py`)
-- [ ] Confidence heuristics (`classifier.py`) — vector margin + coreference/target-candidate-count, NOT LLM self-reported score
-- [ ] Confidence threshold tuning against real/synthetic test cases
-- [ ] Delete intent — target resolution + mandatory confirm + soft-delete on confirm
-- [ ] Target resolution module (`target_resolution.py`) — context → recency heuristic → clarification, shared by update and delete
+### Retrieval  [CORE]
+- [x] Vector store (`store/vector_store.py`, sqlite-vec `vec0`) — chunk-native (`chunk_id`, `note_path`, `chunk_index`, `text`, `embedding float[768]`); note-granularity scoring (collapse chunk hits to parent, min-distance). Adds a `note_paths` candidate filter for the hybrid path + a `clear()` for full rebuilds.
+- [x] Embed helper (`llm/embeddings.py`) — owns the Gemini embed call + mandatory L2 renormalization + prefix/task-type, so neither can be forgotten at a call site. Offline `HashingEmbedder` fallback for no-API dev/tests.
+- [x] Chunking strategy per note type (`ingestion/chunker.py`) — Policy v1 from the decision doc
+- [x] Pin `sqlite-vec` (pre-v1) + `google-genai` in `requirements.txt`
+- [x] **Vector indexing wired into the write pipeline** — create/update embed + (re)index, delete removes, `reindex` clears + rebuilds vectors from source-of-truth markdown alongside the metadata index. Shared note→embed-text composition (`ingestion/embed_text.py`) so the pipeline and eval harness embed identically.
+- [x] `exact_lookup` module (`retrieval/exact_lookup.py`) — merged keyword + structured, no LLM, template-based response (`retrieval/templates.py`); aggregation sub-flag with strict-count-vs-tag-scan dual-check. (Keyword matches title/slug + tags; freeform-note *content* search is the semantic path's job.)
+- [x] `semantic` module (`retrieval/semantic.py`) — vector search. _RAG generation still pending (separate Generation bullet below)._
+- [x] `hybrid` module (`retrieval/hybrid.py`) — metadata filter narrows candidates, vector search within set (accepts an already-resolved date range). _Temporal-expression extraction is upstream in the classifier; RAG generation pending._
 
-### Generation & verification
-- [ ] RAG generation for semantic/hybrid (`llm/gemini_client.py`)
-- [ ] Groundedness check — second LLM call verifying generated answer against retrieved chunks, semantic/hybrid only
+### Classification & routing  [CORE]
+- [x] Rule-based pre-filter for unambiguous creates (`classifier.rule_prefilter`). _Built, but default **OFF** in `LibrarianAgent`: it can only emit a fallback-type `note` (type detection needs the LLM), so firing it on a typed create would mis-route it — per the north star, token efficiency isn't traded against correctness. Opt-in via `use_prefilter=True` (or `--no-prefilter` to force off in the CLI)._
+- [x] Combined LLM classification call — intent + retrieval mode + fields/filters/target/links, one call (`classifier.py`, JSON output, offline-testable via `FakeLLMClient`)
+- [x] Confidence heuristics (`classifier.py`) — `vector_margin` (top-1/top-2 gap) + `confidence_from_candidates` (target-candidate count), NOT LLM self-reported. Vector-margin applies only where vector search runs; update/delete target resolution is guarded by candidate-count.
+- [~] Confidence threshold tuning against real/synthetic test cases — _thresholds live as constants (`CONFIDENCE_THRESHOLD`, `STRONG_MARGIN`); tuning needs a real case set._
+- [x] Delete intent — target resolution + **mandatory confirm** (regardless of confidence) + soft-delete on affirmative (`agent._delete`)
+- [x] Target resolution module (`target_resolution.py`) — explicit path → semantic search + context → recency tie-break → candidate-count confidence, shared by update and delete
+
+### Generation & verification  [CORE]
+- [x] RAG generation for semantic/hybrid (`llm/rag.generate_answer`) — answers strictly from retrieved chunk text
+- [x] Groundedness check (`llm/rag.check_groundedness`) — second LLM call verifying the answer against retrieved chunks (rewrites to supported content on fail, fails open on parse error), semantic/hybrid only
+
+### Orchestration  [CORE]
+- [x] `librarian_handle` entrypoint (`agent.LibrarianAgent.handle`) — classify → route (create / exact_lookup / semantic+hybrid RAG / update / delete) → MCP-contract result (status / message / note_id / action), incl. the `needs_clarification` loop. LLM transport isolated in `llm/gemini_client.py` (real Gemini + `FakeLLMClient`), with per-call token usage captured for the benchmark.
+
+### Eval harness + benchmark  [CORE — highest portfolio ROI]
+- [x] Auto-generated test question script (`eval/harness.py`) — sample N notes, a pluggable generator writes a question per note (avoiding title words), note = gold answer. `GeminiQuestionGenerator` (Flash) for real runs + offline deterministic `KeywordQuestionGenerator` so the harness runs without the API.
+- [x] Scoring — recall@k + MRR / whether gold note lands in top-k; works against any retriever with `.search(query, k)` (semantic or hybrid). Wired into the CLI: `python -m librarian.cli eval --path {semantic,hybrid} -k N`.
+- [~] Run against 15-20+ auto-generated cases, plus the Stage 1 smoke tests re-run through the full pipeline — _harness + CLI ready; a real multi-note run pending a populated vault._
+- [x] Log tokens per request, per path — `benchmark/tokens.py`: `TokenTracker` + `MeteredLLMClient` buckets every LLM call by phase (classify / generation / groundedness). Real `usage_metadata` from Gemini when available, chars/4 estimate offline.
+- [x] **Token A/B benchmark** (`benchmark/ab.py`) — 10 representative requests across create/update/delete/exact/semantic/hybrid. **Arm A** = full `LibrarianAgent` (classify → structured/RAG). **Arm B** = passthrough model (one in-context call over the whole vault). Report: per-request tokens, totals, B/A ratio, Arm A phase concentration, avg by kind. CLI: `python -m librarian.cli benchmark [--arms A,B] [--no-seed]`. _Live numbers need a real Gemini key; offline harness is tested._
+
+### Vault graph  [CORE]
+- [x] LLM-suggested wikilinks at ingestion (1-2 links, same classification call, no extra cost) — classifier extracts `links`; `agent._create` writes them to frontmatter.
+
+### Polish (ship after core paths work)  [CORE-ish, not blocking]
+- [x] Aggregation sub-flag on `exact_lookup` — dual-check (strict count + tag scan) + discrepancy surfacing (`exact_lookup._aggregate` + `templates.render_aggregation`)
 - [ ] Dedup check pre-write — vector similarity vs existing notes on create, threshold-gated `needs_clarification` on near-dupes
 
-### Vault graph
-- [ ] LLM-suggested wikilinks at ingestion (1-2 links, same classification call, no extra cost)
-
-### Eval harness
-- [ ] Auto-generated test question script — sample N notes, LLM writes a question per note (avoiding title words), note = gold answer
-- [ ] Scoring — recall@k / whether gold note lands in top-k, per retrieval path
-- [ ] Run against 15-20+ auto-generated cases, plus the Stage 1 smoke tests re-run through the full pipeline
-- [ ] Log tokens per request, per path — feeds the A/B benchmark below
-
-### Learning over time
-- [ ] Preference/pattern synthesis cron — weekly/monthly pass over high-strength (core/active tier) memories, LLM writes a profile note of inferred preferences/patterns, scoped to vault-content patterns only (not conversational — that's Hermes/Honcho's job if adopted later). Needs real accumulated usage first — don't build/run before Stage 1 has been live a while.
-- [ ] `/correct_librarian` command (or NL equivalent) — PA forwards verbatim to Librarian as an explicit correction; Librarian's classification call tags `reaction` only in this explicit case, logged against `corrections` table
+### Learning over time  [split]
+- [x] **[CORE]** `/correct_librarian` command (or NL equivalent) — classifier sets `is_reaction`; `agent._reaction` logs it against the `corrections` table. (Correction *logging* existed from Stage 1; this is the trigger path.)
 - [ ] ~~PA turn-adjacency tracking~~ — dropped, replaced by explicit trigger above
 
-**Explicitly not in Stage 2:** multi-intent splitting, reranking, GraphRAG/LightRAG, PA wiring, retrieval personalization (needs Stage 2 profile synthesis first), Honcho setup (deferred to Stage 3, default to Hermes built-in memory).
+**Explicitly not in Stage 2:** multi-intent splitting, reranking, GraphRAG/LightRAG, PA wiring, and all [v2] learning items below.
 
 ---
 
 ## Stage 3 — PA
 
-Hermes PA profile, Telegram gateway, Librarian wired in as an MCP server. Depends on Stage 2 being independently solid.
+Hermes PA profile, Telegram gateway, Librarian wired in as an MCP server. Intentionally last (see Guiding principles). Depends on Stage 2 being independently solid.
 
 - [ ] Hermes profile setup, Gemini Flash connected, built-in memory (default — Honcho deferred, config-only upgrade if revisited)
 - [ ] Telegram gateway
 - [ ] Core reminders (PA-only, no vault) — one-off, recurring, birthday feed-in
-- [ ] Habits — interval-based recurring reminder + snooze loop (PA-side: `frequency` drives the interval, "later" snoozes by `snooze_duration`, re-fires until done or next interval). On "done", update the habit note's stats via the Librarian (`completions_total`/`completions_on_time`, `current_streak`/`longest_streak`, `last_completed`). **Finalize the "on time" definition here** (deferred from design — leading candidate: on-time = done on the first reminder of the interval, no snooze). Habit *definition + stats storage* already works via the generic Stage 1 write pipeline; this item is only the PA reminder loop + the stat-increment logic.
-- [ ] Vault-related routing — binary classify (vault-related or not) + PA-side message splitting for mixed intents (e.g. reminder + vault save in one message)
+- [ ] Habits — interval-based recurring reminder + snooze loop (PA-side: `frequency` drives the interval, "later" snoozes by `snooze_duration`, re-fires until done or next interval). On "done", update the habit note's stats via the Librarian. **Finalize the "on time" definition here** (leading candidate: on-time = done on the first reminder of the interval, no snooze). Habit *definition + stats storage* already works via the Stage 1 write pipeline; this item is only the PA reminder loop + stat-increment logic.
+- [ ] Vault-related routing — binary classify (vault-related or not) + PA-side message splitting for mixed intents
 - [ ] Wire `librarian_handle` as MCP tool call, including `needs_clarification` multi-turn loop
 - [ ] Wire `librarian_query_raw` for system-triggered reads (birthday cron, quiz batch-fetch)
 - [ ] Voice input — transcription → text → normal PA pipeline
@@ -90,14 +111,16 @@ Hermes PA profile, Telegram gateway, Librarian wired in as an MCP server. Depend
 
 ---
 
-## Post-Launch / Ongoing
+## v2 — needs real longitudinal data (designed now, built later)
 
-- [ ] **Token A/B benchmark**: PA+Librarian+Obsidian vs PA+direct-Obsidian-MCP, 10-15 representative requests across all paths, log and compare token cost + where cost concentrates
-- [ ] **Retrieval personalization**: weight semantic/hybrid search toward the synthesized profile note on borderline-confidence matches. Depends on Stage 2 preference synthesis being live and producing a usable profile first.
-- [ ] Revisit: Honcho adoption, if Hermes built-in memory proves insufficient
-- [ ] Weekly schema clustering cron — flag emerging note-type patterns for approval
-- [ ] Ebbinghaus daily decay tick
-- [ ] Multi-intent handling (deferred from Stage 2) — list-based classification + sequential execution
-- [ ] Video ingestion (deferred, stretch goal)
-- [ ] Revisit: f-string template alternative for `exact_lookup` responses
-- [ ] Revisit: intent taxonomy rigidity — possible `secondary` intent field
+These are fully designed in Architecture.md and are good resume material *as designed-and-scoped decisions*. They are **not** built for submission because they can't be meaningfully validated without months of accumulated usage — building them early would produce unfalsifiable dead code.
+
+- [ ] **Preference/pattern synthesis cron** — weekly/monthly LLM pass over high-strength memories, writes a profile note of inferred preferences. Needs weeks of real notes + corrections first.
+- [ ] **Retrieval personalization** — weight semantic/hybrid search toward the synthesized profile on borderline-confidence matches. Depends on preference synthesis being live and producing a usable profile.
+- [ ] **Ebbinghaus decay — ranking effects** — daily decay tick + tier transitions. Scope guard (see Architecture): decay only affects rollup/summarization and ranking tie-breaks, **never** removes a note from the candidate set. The tick itself is cheap to add anytime; its *value* only shows with real history.
+- [ ] Weekly schema clustering cron — flag emerging note-type patterns (e.g. `media`, `growth`) for approval.
+- [ ] Multi-intent handling (single message, multiple intents) — list-based classification + sequential execution.
+- [ ] Revisit: Honcho adoption, if Hermes built-in memory proves insufficient.
+- [ ] Revisit: f-string template alternative for `exact_lookup` responses.
+- [ ] Revisit: intent taxonomy rigidity — possible `secondary` intent field.
+- [ ] Video ingestion (stretch goal, no auto-understanding planned).

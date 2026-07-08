@@ -19,10 +19,11 @@ Done:
 
 - [x] `librarian/store/schema.py` — `schema.json` loader + validator (schema-on-read, fallback bucket)
 - [x] `librarian/store/vault_io.py` — direct markdown+frontmatter I/O, `.raw/` write-through, `.trash/` soft-delete
-- [x] `librarian/store/metadata_store.py` — SQLite index (type/tags/dates) + structured query + `corrections` table
-- [x] `librarian/store/git_sync.py` — commit-on-write helper (no-op if vault isn't a git repo)
+- [x] `librarian/store/metadata_store.py` — SQLite index (type/tags/dates) + structured query + atomic rebuild + `corrections` table
+- [x] `librarian/store/git_sync.py` — commit+push-on-write helper (no-op if vault isn't a git repo / has no remote)
 - [x] `librarian/pipeline.py` — write pipeline: build → validate → route → archive raw → write → index → commit; create/update/delete/query_raw
-- [x] `librarian/cli.py` — CLI harness (`python -m librarian.cli init|create|update|query|delete`)
+- [x] `librarian/cli.py` — CLI harness (`python -m librarian.cli init|create|update|query|delete|reindex`)
+- [x] `reindex` — rebuild the metadata index from vault markdown (reconciles external edits / git pulls)
 - [x] `librarian/vault_init.py` — one-command vault scaffolding, seeded from the schema template
 - [x] end-to-end smoke test (create each type, fallback bucket, query, soft-delete, CLI)
 
@@ -86,6 +87,7 @@ python -m librarian.cli create --type contact --field name=Alex --field birthday
 python -m librarian.cli query --type contact
 python -m librarian.cli update contacts/alex.md --field likes=coffee
 python -m librarian.cli delete notes/an-idea.md
+python -m librarian.cli reindex   # rebuild the index from vault markdown (after a git pull / external edits)
 ```
 
 Add `--vault`, `--db`, `--schema` to point at a scratch vault, and `--git` to

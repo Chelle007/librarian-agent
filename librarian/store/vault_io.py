@@ -24,10 +24,16 @@ from pathlib import Path
 
 import frontmatter
 
+from librarian.vault_folders import SYSTEM_FOLDER
+
 _REPO_ROOT = Path(__file__).resolve().parents[2]
 
 RAW_DIR = ".raw"
 TRASH_DIR = ".trash"
+
+# Top-level dirs that hold non-note content and must never be indexed as notes.
+# (.raw/.trash are also skipped by the hidden-path guard, listed here for clarity.)
+NON_NOTE_DIRS = {RAW_DIR, TRASH_DIR, "system", SYSTEM_FOLDER}
 
 
 def default_vault_root() -> Path:
@@ -72,6 +78,22 @@ class VaultIO:
             raise VaultIOError(f"note not found: {p}")
         post = frontmatter.load(str(p))
         return Note(frontmatter=dict(post.metadata), body=post.content, path=p)
+
+    def iter_notes(self):
+        """Yield every content note in the vault (for a full index rebuild).
+
+        Walks all markdown under the vault root, skipping non-note areas
+        (`.raw/`, `.trash/`, `system/`) and any hidden file/dir. This is the
+        source-of-truth walk the metadata index is rebuilt from.
+        """
+        for p in sorted(self.root.rglob("*.md")):
+            rel = p.relative_to(self.root)
+            if rel.parts[0] in NON_NOTE_DIRS:
+                continue
+            if any(part.startswith(".") for part in rel.parts):
+                continue
+            post = frontmatter.load(str(p))
+            yield Note(frontmatter=dict(post.metadata), body=post.content, path=p)
 
     # ----------------------------------------------------------------- write
     def write(

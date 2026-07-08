@@ -13,7 +13,7 @@ def test_create_note(lib):
     res = lib.create(type="note", body="a thought", raw_text="a thought")
     assert res.ok
     assert res.action == "created"
-    assert res.path.startswith("notes/")
+    assert res.path.startswith("📝 notes/")
     # file exists and round-trips
     note = lib.vault.read(res.path)
     assert note.body.strip() == "a thought"
@@ -41,7 +41,7 @@ def test_create_missing_required_fails_no_write(lib):
 def test_create_unknown_type_falls_back_and_tags(lib):
     res = lib.create(type="recipe", body="pasta", raw_text="pasta")
     assert res.ok
-    assert res.path.startswith("notes/")
+    assert res.path.startswith("📝 notes/")
     note = lib.vault.read(res.path)
     assert note.frontmatter["type"] == "note"
     assert "recipe" in note.frontmatter["tags"]
@@ -49,9 +49,9 @@ def test_create_unknown_type_falls_back_and_tags(lib):
 
 def test_create_contact_and_habit(lib):
     c = lib.create(type="contact", fields={"name": "Alex"})
-    assert c.ok and c.path.startswith("contacts/")
+    assert c.ok and c.path.startswith("👤 contacts/")
     h = lib.create(type="habit", fields={"name": "Water", "frequency": "8h"})
-    assert h.ok and h.path.startswith("habits/")
+    assert h.ok and h.path.startswith("🔁 habits/")
 
 
 def test_update(lib):

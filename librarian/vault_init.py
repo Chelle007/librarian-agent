@@ -11,9 +11,10 @@ import shutil
 from pathlib import Path
 
 from librarian.store.schema import TEMPLATE_SCHEMA_PATH, Schema
+from librarian.vault_folders import SYSTEM_FOLDER
 
 # Non-type directories every vault needs.
-SPECIAL_DIRS = [".raw", ".trash", "system/MOC"]
+SPECIAL_DIRS = [".raw", ".trash", f"{SYSTEM_FOLDER}/MOC"]
 
 
 def init_vault(root: str | Path, schema_path: str | Path = TEMPLATE_SCHEMA_PATH) -> Path:
@@ -29,7 +30,7 @@ def init_vault(root: str | Path, schema_path: str | Path = TEMPLATE_SCHEMA_PATH)
     for d in SPECIAL_DIRS:
         (root / d).mkdir(parents=True, exist_ok=True)
 
-    dest = root / "system" / "schema.json"
+    dest = root / SYSTEM_FOLDER / "schema.json"
     dest.parent.mkdir(parents=True, exist_ok=True)
     if not dest.exists():
         shutil.copyfile(str(schema_path), str(dest))

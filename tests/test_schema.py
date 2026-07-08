@@ -24,7 +24,7 @@ def test_valid_note(schema: Schema):
     result = schema.validate_note({"type": "note", "created_date": "2026-07-07"})
     assert result.is_valid
     assert result.resolved_type == "note"
-    assert result.folder == "notes/"
+    assert result.folder == "📝 notes/"
     assert not result.unknown_type
 
 
@@ -33,7 +33,7 @@ def test_valid_contact(schema: Schema):
         {"type": "contact", "created_date": "2026-07-07", "name": "Alex"}
     )
     assert result.is_valid
-    assert result.folder == "contacts/"
+    assert result.folder == "👤 contacts/"
 
 
 def test_contact_missing_required_name(schema: Schema):
@@ -52,7 +52,7 @@ def test_valid_habit(schema: Schema):
         }
     )
     assert result.is_valid
-    assert result.folder == "habits/"
+    assert result.folder == "🔁 habits/"
 
 
 def test_habit_missing_frequency(schema: Schema):
@@ -67,7 +67,7 @@ def test_unknown_type_falls_back_to_note(schema: Schema):
     result = schema.validate_note({"type": "recipe", "created_date": "2026-07-07"})
     assert result.is_valid  # fallback 'note' has no extra required fields
     assert result.resolved_type == "note"
-    assert result.folder == "notes/"
+    assert result.folder == "📝 notes/"
     assert result.unknown_type is True
 
 
@@ -86,9 +86,9 @@ def test_empty_string_counts_as_missing(schema: Schema):
 
 
 def test_folder_for_resolves_fallback(schema: Schema):
-    assert schema.folder_for("contact") == "contacts/"
-    assert schema.folder_for("does-not-exist") == "notes/"
-    assert schema.folder_for(None) == "notes/"
+    assert schema.folder_for("contact") == "👤 contacts/"
+    assert schema.folder_for("does-not-exist") == "📝 notes/"
+    assert schema.folder_for(None) == "📝 notes/"
 
 
 def test_bad_schema_path_raises():
@@ -97,5 +97,5 @@ def test_bad_schema_path_raises():
 
 
 def test_validation_result_shape():
-    r = ValidationResult(resolved_type="note", folder="notes/")
+    r = ValidationResult(resolved_type="note", folder="📝 notes/")
     assert r.is_valid

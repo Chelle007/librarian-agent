@@ -8,6 +8,7 @@ through the CLI harness.
 from __future__ import annotations
 
 from librarian.cli import main
+from librarian.vault_folders import SYSTEM_FOLDER
 
 
 def test_end_to_end_scenario(lib):
@@ -22,7 +23,7 @@ def test_end_to_end_scenario(lib):
     # 5. fallback-bucket create (unknown type -> notes/, original type tagged)
     fallback = lib.create(type="recipe", body="carbonara", raw_text="carbonara")
     assert fallback.ok
-    assert fallback.path.startswith("notes/")
+    assert fallback.path.startswith("📝 notes/")
     assert "recipe" in lib.vault.read(fallback.path).frontmatter["tags"]
 
     # invalid create is rejected and leaves no trace
@@ -47,13 +48,13 @@ def test_end_to_end_scenario(lib):
 
 
 def test_cli_create_and_query(temp_vault, capsys):
-    schema = str(temp_vault / "system" / "schema.json")
+    schema = str(temp_vault / SYSTEM_FOLDER / "schema.json")
     db = str(temp_vault / "index.sqlite")
     common = ["--vault", str(temp_vault), "--db", db, "--schema", schema]
 
     rc = main(common + ["create", "--type", "contact", "--field", "name=Sam", "--tag", "friend"])
     assert rc == 0
-    assert "created contacts/sam.md" in capsys.readouterr().out
+    assert "created 👤 contacts/sam.md" in capsys.readouterr().out
 
     rc = main(common + ["query", "--type", "contact"])
     assert rc == 0

@@ -35,6 +35,7 @@ class GitSync:
         return result.returncode == 0
 
     def push(self) -> bool:
+        """Push to the remote. No-op (returns False) if disabled or no remote."""
         if not self.enabled:
             return False
         result = subprocess.run(
@@ -43,3 +44,15 @@ class GitSync:
             text=True,
         )
         return result.returncode == 0
+
+    def commit_and_push(self, message: str) -> bool:
+        """Commit, then push. Returns True only if a commit was made.
+
+        A failed push (e.g. no configured remote, offline) is intentionally
+        swallowed: the local commit still succeeded and the VPS cron pull /
+        next write will reconcile. Vault integrity never depends on the network.
+        """
+        committed = self.commit(message)
+        if committed:
+            self.push()
+        return committed
