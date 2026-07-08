@@ -33,7 +33,8 @@ TRASH_DIR = ".trash"
 
 # Top-level dirs that hold non-note content and must never be indexed as notes.
 # (.raw/.trash are also skipped by the hidden-path guard, listed here for clarity.)
-NON_NOTE_DIRS = {RAW_DIR, TRASH_DIR, "system", SYSTEM_FOLDER}
+# `_staging/` is a pre-ingest drop zone (skipped when indexing).
+NON_NOTE_DIRS = {RAW_DIR, TRASH_DIR, "system", SYSTEM_FOLDER, "_staging"}
 
 
 def default_vault_root() -> Path:

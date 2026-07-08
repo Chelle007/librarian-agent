@@ -19,9 +19,5 @@ venv/
 # Seed a fresh vault with: python -m librarian.cli init
 /vault/
 
-# Notion migration inputs — personal note exports/raw captures; keep local only
-scripts/notion_export/University/
-scripts/notion_pages/*.raw
-
 # OS
 .DS_Store
