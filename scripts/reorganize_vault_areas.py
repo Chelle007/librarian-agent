@@ -85,40 +85,42 @@ def _build_moc(root: Path) -> str:
         "",
         "Browse by domain — how the Librarian filters mentally (`tag:work`, `tag:travel`, etc.).",
         "",
-        "## 👤 Contacts",
-        "_People — birthdays, likes, relationships_",
-        "",
     ]
     contacts_dir = root / CONTACTS_FOLDER
     if not contacts_dir.is_dir():
         contacts_dir = root / "contacts"
     if contacts_dir.is_dir():
-        for p in sorted(contacts_dir.glob("*.md")):
-            slug = p.stem
-            lines.append(f"- [[{slug}|{_title_from_slug(slug)}]]")
-    else:
-        lines.append("- _Empty._")
-    lines.append("")
+        contact_files = sorted(contacts_dir.glob("*.md"))
+        if contact_files:
+            lines.extend(
+                [
+                    "## 👤 Contacts",
+                    "_People — birthdays, likes, relationships_",
+                    "",
+                ]
+            )
+            for p in contact_files:
+                slug = p.stem
+                lines.append(f"- [[{slug}|{_title_from_slug(slug)}]]")
+            lines.append("")
     notes_root = _notes_root(root)
     for area in NOTE_AREAS:
         section_dir = notes_root / AREA_FOLDERS[area]
         if not section_dir.is_dir():
             section_dir = notes_root / area
+        if not section_dir.is_dir():
+            continue
+        md_files = sorted(section_dir.rglob("*.md"))
+        if not md_files:
+            continue
         blurb = AREA_BLURBS.get(area, "")
         lines.append(f"## {AREA_HEADERS[area]}")
         if blurb:
             lines.append(f"_{blurb}_")
         lines.append("")
-        if section_dir.is_dir():
-            md_files = sorted(section_dir.rglob("*.md"))
-            if md_files:
-                for p in md_files:
-                    slug = p.stem
-                    lines.append(f"- [[{slug}|{_title_from_slug(slug)}]]")
-            else:
-                lines.append("- _Empty._")
-        else:
-            lines.append("- _Empty._")
+        for p in md_files:
+            slug = p.stem
+            lines.append(f"- [[{slug}|{_title_from_slug(slug)}]]")
         lines.append("")
     return "\n".join(lines).rstrip() + "\n"
 
