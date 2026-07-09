@@ -44,6 +44,16 @@ _MUTATION_VERBS = re.compile(
 )
 # Reference words hinting the request points at an *existing* note (update/delete).
 _REFERENCES = re.compile(r"\b(it|that|this|those|these|the last|my)\b", re.IGNORECASE)
+_META_CORRECTION = re.compile(
+    r"(/correct_librarian|correct[_ ]the[_ ]librarian|that was wrong|wrong (note )?type|"
+    r"misclassified|should have been (a |an )?)",
+    re.IGNORECASE,
+)
+
+
+def _is_librarian_meta_correction(text: str) -> bool:
+    """True only for feedback about the librarian's routing — not new vault facts."""
+    return bool(_META_CORRECTION.search(text or ""))
 
 
 @dataclass
@@ -59,6 +69,9 @@ class Classification:
     filters: dict = field(default_factory=dict)  # type/tag/keyword/date/aggregate
     target_ref: str | None = None  # reference phrase for update/delete
     is_reaction: bool = False  # explicit /correct_librarian trigger
+    actionable: bool = True  # false → router asks before mutating or querying
+    clarify_message: str = ""
+    is_confirmation: bool = False  # affirming a pending action described in context
     source: str = "llm"  # "llm" | "prefilter"
     raw: dict = field(default_factory=dict)
 
@@ -118,7 +131,20 @@ class Classifier:
         if intent == "query" and mode not in MODES:
             mode = "semantic"
 
+        is_reaction = bool(data.get("is_reaction"))
+        # New facts ("Desmond is my bf") are updates, not log-only librarian feedback.
+        if is_reaction and not _is_librarian_meta_correction(raw_request):
+            is_reaction = False
+
         note_type = data.get("note_type") or None
+        actionable = data.get("actionable", True)
+        if actionable is False or actionable == "false":
+            actionable = False
+        else:
+            actionable = True
+        clarify_message = (data.get("clarify_message") or data.get("message") or "").strip()
+        if not actionable and not clarify_message:
+            clarify_message = "I need a bit more context before I can do that."
         return Classification(
             intent=intent,
             mode=mode,
@@ -130,7 +156,10 @@ class Classifier:
             query_text=data.get("query_text") or raw_request,
             filters=data.get("filters") or {},
             target_ref=data.get("target_ref") or None,
-            is_reaction=bool(data.get("is_reaction")),
+            is_reaction=is_reaction,
+            actionable=actionable,
+            clarify_message=clarify_message,
+            is_confirmation=bool(data.get("is_confirmation")),
             source="llm",
             raw=data,
         )
@@ -188,16 +217,31 @@ Return JSON with these keys:
     (exact_lookup = structured/keyword filter or a count; semantic = meaning-based
      content search; hybrid = content search constrained by a type/tag/date filter)
 - "note_type": for create/update, the note type (or null)
-- "fields": object of frontmatter fields to set (e.g. name, due_date, rating)
+- "fields": object of frontmatter fields to set (e.g. name, due_date, rating).
+    For typed facts, set note_type and the schema's identity fields for that type
+    (e.g. contact.name, habit.name+frequency, task.due_date).
 - "tags": array of tags
-- "links": array of 1-2 suggested wikilink targets based on the content (may be empty)
+- "links": array of wikilink targets (note stems) suggested from content; merged on write
 - "body": the note's prose body, for create/update (or null)
 - "query_text": the natural-language search text, for query (or null)
 - "filters": for exact_lookup/hybrid — object with any of
     type, tag, keyword, created_after (YYYY-MM-DD), created_before (YYYY-MM-DD),
     aggregate (true for "how many"). Convert relative times ("last month") to dates.
 - "target_ref": for update/delete, the phrase identifying which note (or null)
-- "is_reaction": true only if this is an explicit correction to the librarian
+- "is_reaction": true ONLY for meta-feedback about the librarian's mistake
+    (e.g. "/correct_librarian that was a task not a note"). NOT for new facts
+    about vault content — those are intent=update (e.g. "Desmond is my boyfriend"
+    after asking who Desmond is → update the contact, is_reaction=false).
+- "actionable": false when the request cannot be executed without more user input
+    — e.g. a short reply with no conversation context explaining what to confirm;
+    greetings or off-topic chitchat with no vault content; a follow-up that only
+    makes sense if context contained a pending librarian question but does not.
+    true when self-contained or context supplies what is needed.
+- "clarify_message": short question for the user when actionable is false (else "")
+- "is_confirmation": true when the user affirms or approves a pending vault action
+    described in the conversation context (delete confirm, conflict override, etc.).
+    Requires context to describe the SPECIFIC pending change — not just a note path.
+    false otherwise.
 {context}
 Request:
 {request}

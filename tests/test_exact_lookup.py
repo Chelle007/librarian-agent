@@ -5,6 +5,7 @@ from __future__ import annotations
 import pytest
 
 from librarian.retrieval.exact_lookup import ExactLookup
+from librarian.vault_folders import CONTACTS_FOLDER, NOTES_FOLDER
 
 
 @pytest.fixture
@@ -35,14 +36,14 @@ def test_keyword_matches_title_slug(lookup):
     # keyword matches the note's title/slug (a contact's name becomes its filename)
     res = lookup.lookup(keyword="sam")
     assert res.count == 1
-    assert res.hits[0].path == "contacts/sam.md"
+    assert res.hits[0].path == f"{CONTACTS_FOLDER}/sam.md"
 
 
 def test_keyword_matches_tag(lookup):
     # 'book' is only present as a tag on the fallback-bucket note, not in any slug
     res = lookup.lookup(keyword="book")
     assert res.count == 1
-    assert res.hits[0].path.startswith("notes/")
+    assert res.hits[0].path.startswith(f"{NOTES_FOLDER}/")
     assert "book" in res.hits[0].tags
 
 

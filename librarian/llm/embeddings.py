@@ -135,9 +135,15 @@ class GeminiEmbedder:
     def embed_documents(self, texts: list[str]) -> list[list[float]]:
         if not texts:
             return []
-        if self._is_v2:
-            return self._embed_raw([f"title: none | text: {t}" for t in texts])
-        return self._embed_raw(texts, task_type="RETRIEVAL_DOCUMENT")
+        # gemini-embedding-2 returns one vector per embed_content call even when
+        # multiple contents are passed — embed sequentially for a 1:1 mapping.
+        out: list[list[float]] = []
+        for t in texts:
+            if self._is_v2:
+                out.append(self._embed_raw([f"title: none | text: {t}"])[0])
+            else:
+                out.append(self._embed_raw([t], task_type="RETRIEVAL_DOCUMENT")[0])
+        return out
 
     def embed_query(self, text: str) -> list[float]:
         if self._is_v2:

@@ -54,10 +54,12 @@ def test_reindex_rebuilds_vectors(lib):
 
 
 def test_vectors_can_be_disabled(temp_vault):
+    from librarian.vault_folders import SYSTEM_FOLDER
+
     lib = Librarian(
         vault_root=temp_vault,
         db_path=":memory:",
-        schema_path=temp_vault / "system" / "schema.json",
+        schema_path=temp_vault / SYSTEM_FOLDER / "schema.json",
         vector_enabled=False,
         embedder=HashingEmbedder(dim=64),  # ignored when disabled
     )

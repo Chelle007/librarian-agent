@@ -5,6 +5,7 @@ from __future__ import annotations
 import pytest
 
 from librarian.retrieval.hybrid import HybridRetriever
+from librarian.vault_folders import NOTES_FOLDER, TASKS_FOLDER
 
 
 @pytest.fixture
@@ -19,12 +20,12 @@ def hybrid(lib):
 def test_type_filter_restricts_candidates(hybrid):
     hits = hybrid.search("bread yeast flour", type="task", k=5)
     assert hits
-    assert all("tasks/" in h.note_path for h in hits)
+    assert all(TASKS_FOLDER in h.note_path for h in hits)
 
 
 def test_without_filter_ranks_globally(hybrid):
     hits = hybrid.search("bread yeast flour baking", k=5)
-    assert hits[0].note_path.startswith("notes/")  # the note is the closest match
+    assert hits[0].note_path.startswith(f"{NOTES_FOLDER}/")
 
 
 def test_date_range_filter(lib):

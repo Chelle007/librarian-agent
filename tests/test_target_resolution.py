@@ -6,6 +6,7 @@ from dataclasses import dataclass
 
 from librarian.retrieval.semantic import SemanticRetriever
 from librarian.target_resolution import resolve_target
+from librarian.vault_folders import NOTES_FOLDER
 
 
 @dataclass
@@ -37,7 +38,7 @@ def test_single_strong_candidate_resolves(lib):
     retriever = SemanticRetriever(lib.vector_store, lib.embedder)
     tr = resolve_target("asyncio concurrency", meta=lib.meta, retriever=retriever)
     assert tr.resolved
-    assert "python" in tr.path or tr.path.startswith("notes/")
+    assert "python" in tr.path or tr.path.startswith(f"{NOTES_FOLDER}/")
     assert tr.confidence == 1.0
 
 

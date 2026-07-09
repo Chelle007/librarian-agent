@@ -86,6 +86,23 @@ def test_classify_prefilter_skips_llm(schema):
     assert llm.calls == []  # LLM never called
 
 
+def test_classify_actionable_false(schema):
+    llm = FakeLLMClient(
+        responses=[
+            json.dumps(
+                {
+                    "intent": "create",
+                    "actionable": False,
+                    "clarify_message": "What should I save?",
+                }
+            )
+        ]
+    )
+    c = Classifier(llm, schema, use_prefilter=False).classify("yes")
+    assert not c.actionable
+    assert "save" in c.clarify_message.lower()
+
+
 # ---------------------------------------------------------------- confidence
 def test_vector_margin_single_hit_is_max():
     assert vector_margin([_Hit(0.9)]) == 1.0

@@ -19,6 +19,7 @@ ambiguous cluster routes to `needs_clarification` rather than guessing silently.
 from __future__ import annotations
 
 from dataclasses import dataclass, field
+from pathlib import Path
 
 from librarian.classifier import STRONG_MARGIN, confidence_from_candidates
 from librarian.store.metadata_store import MetadataStore
@@ -46,9 +47,10 @@ def resolve_target(
     """Resolve a reference phrase to a note path (see module docstring)."""
     ref = (target_ref or "").strip()
 
-    # 1. explicit path that actually exists in the index
-    if _looks_like_path(ref) and meta.get(ref) is not None:
-        return TargetResolution(path=ref, candidates=[ref], confidence=1.0)
+    # 1. explicit path that actually exists in the index (incl. emoji-folder suffixes)
+    existing = resolve_existing_path(ref, meta)
+    if existing:
+        return TargetResolution(path=existing, candidates=[existing], confidence=1.0)
 
     # 2. semantic search, coreference-resolved via context
     query = " ".join(p for p in (ref, context) if p).strip()
@@ -63,7 +65,7 @@ def resolve_target(
     cluster = [h.note_path for h in hits if top - h.score <= STRONG_MARGIN]
 
     # 3. recency tie-break for the best guess (still gated by candidate count)
-    primary = _recency_pick(cluster, meta) or hits[0].note_path
+    primary = recency_pick(cluster, meta) or hits[0].note_path
     return TargetResolution(
         path=primary,
         candidates=cluster,
@@ -71,11 +73,34 @@ def resolve_target(
     )
 
 
-def _looks_like_path(ref: str) -> bool:
-    return ref.endswith(".md") or "/" in ref
+def resolve_existing_path(ref: str, meta: MetadataStore) -> str | None:
+    """Resolve a vault path, including emoji-prefixed folders and suffix matches."""
+    ref = (ref or "").strip()
+    if not ref:
+        return None
+    if meta.get(ref) is not None:
+        return ref
+
+    basename = Path(ref).name
+    matches = [
+        row["path"]
+        for row in meta.query()
+        if row["path"] == ref
+        or row["path"].endswith("/" + ref)
+        or Path(row["path"]).name == basename
+    ]
+    if not matches:
+        return None
+
+    suffix = [p for p in matches if p.endswith(ref) or p.endswith("/" + ref)]
+    if len(suffix) == 1:
+        return suffix[0]
+    if len(matches) == 1:
+        return matches[0]
+    return None
 
 
-def _recency_pick(paths: list[str], meta: MetadataStore) -> str | None:
+def recency_pick(paths: list[str], meta: MetadataStore) -> str | None:
     """Return the most recently modified of `paths` (recency heuristic)."""
     rows = [r for p in paths if (r := meta.get(p)) is not None]
     if not rows:
