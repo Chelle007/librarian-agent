@@ -51,11 +51,3 @@ def format_mention_confirm(
         lines.append(f'(You said: "{original_request.strip()}")')
     lines.append(f"Same entity? Confirm to {action} and link these notes.")
     return "\n".join(lines)
-
-
-def mentions_confirmed(context: str | None, mentions: list[Mention], label: str) -> bool:
-    if not context:
-        return False
-    if label.lower() in context.lower() and "mentioned elsewhere" in context.lower():
-        return True
-    return any(m.path in context or wikilink_label(m.path) in context for m in mentions)

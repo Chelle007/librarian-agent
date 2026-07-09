@@ -13,7 +13,7 @@ writes + structured reads) with the LLM layer:
 Keeping the deterministic core (`Librarian`) and this LLM router in separate
 classes is deliberate: Stage 1 stays testable without any model, and this layer
 is testable by injecting a `FakeLLMClient`. The return shape matches the MCP
-contract (status / message / note_id / action) from the Architecture doc.
+contract (status / message / note_id / action / pending_id) from the Architecture doc.
 """
 
 from __future__ import annotations
@@ -21,25 +21,17 @@ from __future__ import annotations
 from dataclasses import dataclass
 
 from librarian.classifier import Classification, Classifier, _is_librarian_meta_correction
-from librarian.link_resolution import (
-    apply_links,
-    format_mention_confirm,
-    mentions_confirmed,
-    wikilink_label,
-)
-from librarian.llm.context_gate import context_references_path
-from librarian.llm.gemini_client import LLMClient
-from librarian.llm.pending_update import (
-    apply_pending_mutation,
-    has_proposed_changes,
-    is_pending_mutation_context,
-    recover_pending_mutation,
-    recover_pending_update,
-)
-from librarian.llm.rag import check_groundedness, generate_answer
-from librarian.llm.update_check import check_update_conflict
+from librarian.link_resolution import apply_links, format_mention_confirm, wikilink_label
 from librarian.mention_search import find_mentions, identity_label
 from librarian.note_preview import format_target_confirm
+from librarian.llm.gemini_client import LLMClient
+from librarian.llm.rag import check_groundedness, generate_answer
+from librarian.llm.update_check import check_update_conflict
+from librarian.pending_confirm import (
+    DEFAULT_TTL_SECONDS,
+    DELETE_TTL_SECONDS,
+    classification_from_pending,
+)
 from librarian.pipeline import Librarian
 from librarian.retrieval.exact_lookup import ExactLookup
 from librarian.retrieval.hybrid import HybridRetriever
@@ -54,6 +46,7 @@ class HandleResult:
     message: str
     note_id: str | None = None
     action: str | None = None  # "created" | "updated" | "deleted" | "queried" | None
+    pending_id: str | None = None
 
 
 class LibrarianAgent:
@@ -62,8 +55,6 @@ class LibrarianAgent:
         self.llm = llm
         self.classifier = Classifier(llm, librarian.schema)
         self.exact = ExactLookup(librarian.meta, librarian.vault)
-        # Semantic/hybrid need the vector store; absent it, those paths error out
-        # cleanly instead of pretending to search.
         self.semantic: SemanticRetriever | None = None
         self.hybrid: HybridRetriever | None = None
         if librarian.vector_store is not None and librarian.embedder is not None:
@@ -88,13 +79,43 @@ class LibrarianAgent:
             return self._delete(c, raw_request, context)
         return HandleResult("error", "I couldn't understand that request.")
 
+    def handle_confirm(self, pending_id: str, *, approved: bool) -> HandleResult:
+        row = self.lib.meta.get_pending(pending_id)
+        if row is None:
+            return HandleResult(
+                "needs_clarification",
+                "That confirmation expired or was not found. Say it again if you still want that.",
+            )
+        if not approved:
+            self.lib.meta.settle_pending(pending_id, "rejected")
+            return HandleResult("done", "Cancelled.", action=None)
+
+        self.lib.meta.settle_pending(pending_id, "approved")
+        c = classification_from_pending(row)
+        raw_request = row["raw_request"]
+        link_paths = row["link_paths"]
+
+        if row["intent"] == "delete":
+            path = row["target_path"]
+            assert path
+            res = self.lib.delete(path)
+            return HandleResult("done", res.message, note_id=res.note_id, action="deleted")
+        if row["intent"] == "update":
+            assert row["target_path"]
+            return self._apply_update(
+                c,
+                row["target_path"],
+                raw_request,
+                link_paths=link_paths,
+                skip_conflict=True,
+            )
+        if row["intent"] == "create":
+            return self._apply_create(c, raw_request, link_paths=link_paths)
+        return HandleResult("error", "Unknown pending intent.")
+
     # ----------------------------------------------------------- create/update
     def _mutate(self, c: Classification, raw_request: str, context: str | None) -> HandleResult:
-        c, recover_block = self._recover_mutation_if_needed(c, raw_request, context)
-        if recover_block is not None:
-            return recover_block
-
-        if not c.fields and not c.body and c.intent == "update" and not c.is_confirmation:
+        if not c.fields and not c.body and c.intent == "update":
             c.body = raw_request.strip()
 
         wr = resolve_write_target(
@@ -114,42 +135,20 @@ class LibrarianAgent:
             )
         if wr.action == "update":
             assert wr.path is not None
-            mention_gate = self._gate_mentions(c, raw_request, context, target_path=wr.path)
+            mention_gate = self._gate_mentions(c, raw_request, target_path=wr.path)
             if mention_gate is not None:
                 return mention_gate
-            link_paths = self._mention_link_paths(c, context, wr.path)
-            return self._apply_update(c, wr.path, raw_request, context, link_paths=link_paths)
+            return self._apply_update(c, wr.path, raw_request)
 
-        mention_gate = self._gate_mentions(c, raw_request, context, target_path=None)
+        mention_gate = self._gate_mentions(c, raw_request, target_path=None)
         if mention_gate is not None:
             return mention_gate
-        return self._apply_create(
-            c,
-            raw_request,
-            link_paths=self._mention_link_paths(c, context, None),
-        )
-
-    def _recover_mutation_if_needed(
-        self,
-        c: Classification,
-        raw_request: str,
-        context: str | None,
-    ) -> tuple[Classification, HandleResult | None]:
-        if not c.is_confirmation or not is_pending_mutation_context(context):
-            return c, None
-        if identity_label(c.fields) and has_proposed_changes(c, raw_request):
-            return c, None
-
-        pending = recover_pending_mutation(self.llm, context=context, request=raw_request)
-        if not pending.sufficient:
-            return c, HandleResult("needs_clarification", pending.message)
-        return apply_pending_mutation(c, pending), None
+        return self._apply_create(c, raw_request)
 
     def _gate_mentions(
         self,
         c: Classification,
         raw_request: str,
-        context: str | None,
         *,
         target_path: str | None,
     ) -> HandleResult | None:
@@ -164,35 +163,54 @@ class LibrarianAgent:
             mentions = [m for m in mentions if wikilink_label(m.path) not in linked]
         if not mentions:
             return None
-        if c.is_confirmation and mentions_confirmed(context, mentions, label):
-            return None
+
         action = "update" if target_path else "save"
-        return HandleResult(
-            "needs_clarification",
-            format_mention_confirm(
-                self.lib.vault, label, mentions, action=action, original_request=raw_request
-            ),
-            note_id=target_path,
+        message = format_mention_confirm(
+            self.lib.vault, label, mentions, action=action, original_request=raw_request
+        )
+        return self._pending(
+            kind="mention",
+            intent="update" if target_path else "create",
+            message=message,
+            c=c,
+            raw_request=raw_request,
+            target_path=target_path,
+            link_paths=[m.path for m in mentions],
         )
 
-    def _mention_link_paths(
+    def _pending(
         self,
+        *,
+        kind: str,
+        intent: str,
+        message: str,
         c: Classification,
-        context: str | None,
-        target_path: str | None,
-    ) -> list[str]:
-        label = identity_label(c.fields)
-        if not label or not c.is_confirmation:
-            return []
-        mentions = find_mentions(
-            label,
-            self.lib.meta,
-            self.lib.vault,
-            exclude={target_path} if target_path else set(),
+        raw_request: str,
+        target_path: str | None = None,
+        link_paths: list[str] | None = None,
+        body: str | None = None,
+        ttl_seconds: int = DEFAULT_TTL_SECONDS,
+    ) -> HandleResult:
+        pending_id = self.lib.meta.create_pending(
+            kind=kind,
+            intent=intent,
+            message=message,
+            raw_request=raw_request,
+            note_type=c.note_type,
+            target_path=target_path,
+            fields=c.fields,
+            body=body if body is not None else c.body,
+            link_paths=link_paths,
+            tags=c.tags,
+            links=c.links,
+            ttl_seconds=ttl_seconds,
         )
-        if not mentions_confirmed(context, mentions, label):
-            return []
-        return [m.path for m in mentions]
+        return HandleResult(
+            "needs_clarification",
+            message,
+            note_id=target_path,
+            pending_id=pending_id,
+        )
 
     def _apply_create(
         self, c: Classification, raw_request: str, *, link_paths: list[str] | None = None
@@ -240,37 +258,16 @@ class LibrarianAgent:
         c: Classification,
         path: str,
         raw_request: str,
-        context: str | None,
         *,
         link_paths: list[str] | None = None,
+        skip_conflict: bool = False,
     ) -> HandleResult:
         note = self.lib.vault.read(path)
         body = c.body
-        confirming = _confirms_pending_action(c, context, path)
-
-        if confirming and not has_proposed_changes(c, raw_request):
-            pending = recover_pending_update(
-                self.llm,
-                context=context,
-                path=path,
-                existing_frontmatter=note.frontmatter,
-                existing_body=note.body,
-                request=raw_request,
-            )
-            if not pending.sufficient:
-                return HandleResult("needs_clarification", pending.message, note_id=path)
-            if pending.fields:
-                merged = dict(c.fields)
-                merged.update(pending.fields)
-                c.fields = merged
-            if pending.body:
-                c.body = pending.body
-            body = c.body
-
         if body and note.body and body.strip() not in note.body:
             body = note.body.rstrip() + "\n\n" + body.strip()
 
-        if not confirming:
+        if not skip_conflict:
             conflict = check_update_conflict(
                 self.llm,
                 existing_frontmatter=note.frontmatter,
@@ -280,10 +277,16 @@ class LibrarianAgent:
                 request=raw_request,
             )
             if conflict.has_conflict:
-                return HandleResult(
-                    "needs_clarification",
-                    f"{conflict.message} Confirm if you want to update anyway.",
-                    note_id=path,
+                message = f"{conflict.message} Confirm if you want to update anyway."
+                return self._pending(
+                    kind="conflict",
+                    intent="update",
+                    message=message,
+                    c=c,
+                    raw_request=raw_request,
+                    target_path=path,
+                    link_paths=link_paths,
+                    body=body,
                 )
 
         fields = apply_links(
@@ -368,15 +371,16 @@ class LibrarianAgent:
                 note_id=tr.path,
             )
 
-        if not c.is_confirmation or not context_references_path(context, tr.path):
-            return HandleResult(
-                "needs_clarification",
-                f"Delete {tr.path}? This can't be undone via chat — confirm to proceed.",
-                note_id=tr.path,
-            )
-
-        res = self.lib.delete(tr.path)
-        return HandleResult("done", res.message, note_id=res.note_id, action="deleted")
+        message = f"Delete {tr.path}? This can't be undone via chat — confirm to proceed."
+        return self._pending(
+            kind="delete",
+            intent="delete",
+            message=message,
+            c=c,
+            raw_request=raw_request,
+            target_path=tr.path,
+            ttl_seconds=DELETE_TTL_SECONDS,
+        )
 
     # ---------------------------------------------------------------- reaction
     def _reaction(self, c: Classification, raw_request: str, context: str | None) -> HandleResult:
@@ -405,8 +409,3 @@ def _clarify_target(action: str, tr, vault) -> str:
         return format_target_confirm(vault, tr.path, action=action)
     listing = "; ".join(tr.candidates)
     return f"Which note should I {action}? I found several: {listing}."
-
-
-def _confirms_pending_action(c: Classification, context: str | None, path: str) -> bool:
-    """Skip conflict check when context shows the user confirmed this update."""
-    return c.is_confirmation and context_references_path(context, path)

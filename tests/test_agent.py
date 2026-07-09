@@ -24,48 +24,21 @@ def make_llm(
     revised: str = "",
     conflict: bool = False,
     conflict_message: str = "",
-    pending_sufficient: bool = True,
-    pending_message: str = "",
-    pending_fields: dict | None = None,
-    pending_body: str | None = None,
-    pending_mutation_json: str | None = None,
-    pending_note_type: str | None = None,
 ):
     """A fake LLM that dispatches by prompt/flag to the right scripted reply."""
     payload = {"actionable": True, **classification}
     classify_json = json.dumps(payload)
     ground_json = json.dumps({"grounded": grounded, "revised": revised})
     conflict_json = json.dumps({"conflict": conflict, "message": conflict_message})
-    pending_json = json.dumps(
-        {
-            "sufficient": pending_sufficient,
-            "message": pending_message,
-            "fields": pending_fields or {},
-            "body": pending_body,
-        }
-    )
-    mutation_json = pending_mutation_json or json.dumps(
-        {
-            "sufficient": pending_sufficient,
-            "message": pending_message,
-            "note_type": pending_note_type,
-            "fields": pending_fields or {},
-            "body": pending_body,
-        }
-    )
 
     def handler(prompt, system, response_json):
         if "Classify the request" in prompt:
             return classify_json
-        if "UPDATE to an existing note" in prompt:
-            return pending_json
-        if "CREATE or UPDATE" in prompt:
-            return mutation_json
         if response_json and "contradict" in prompt.lower():
             return conflict_json
-        if response_json:  # the groundedness fact-check call
+        if response_json:
             return ground_json
-        return answer  # RAG generation (free text)
+        return answer
 
     return FakeLLMClient(handler=handler)
 
@@ -168,30 +141,16 @@ def test_handle_update_conflict_asks_confirmation(lib):
     )
     res = agent.handle("desmond is my girlfriend")
     assert res.status == "needs_clarification"
+    assert res.pending_id
     assert "boyfriend" in res.message.lower()
     assert lib.vault.read(created.path).frontmatter["relationship"] == "boyfriend"
 
-    confirmed = agent_with(
-        lib,
-        {
-            "intent": "update",
-            "target_ref": "Desmond",
-            "is_confirmation": True,
-        },
-        pending_fields={"relationship": "girlfriend"},
-        pending_body="desmond is my girlfriend",
-    ).handle(
-        "yes",
-        context=(
-            f"User: desmond is my girlfriend. Librarian: conflicts with boyfriend. "
-            f"Confirm update {created.path}"
-        ),
-    )
+    confirmed = agent.handle_confirm(res.pending_id, approved=True)
     assert confirmed.status == "done" and confirmed.action == "updated"
     assert lib.vault.read(created.path).frontmatter["relationship"] == "girlfriend"
 
 
-def test_confirm_update_with_vague_context_needs_clarification(lib):
+def test_expired_pending_needs_clarification(lib):
     created = lib.create(
         type="contact",
         fields={"name": "Desmond", "relationship": "boyfriend"},
@@ -202,12 +161,15 @@ def test_confirm_update_with_vague_context_needs_clarification(lib):
         {
             "intent": "update",
             "target_ref": "Desmond",
-            "is_confirmation": True,
+            "fields": {"relationship": "girlfriend"},
+            "body": "desmond is my girlfriend",
         },
-        pending_sufficient=False,
-        pending_message="What should I change on that note?",
+        conflict=True,
+        conflict_message="Conflicts with boyfriend.",
     )
-    res = agent.handle("yes", context=f"Confirm update {created.path}")
+    gate = agent.handle("desmond is my girlfriend")
+    lib.meta.settle_pending(gate.pending_id, "expired")
+    res = agent.handle_confirm(gate.pending_id, approved=True)
     assert res.status == "needs_clarification"
     assert lib.vault.read(created.path).frontmatter["relationship"] == "boyfriend"
 
@@ -221,14 +183,11 @@ def test_handle_delete_confirms_then_deletes(lib):
     # first pass: must ask for confirmation, note not yet gone
     first = agent.handle("delete that junk note")
     assert first.status == "needs_clarification"
+    assert first.pending_id
     assert "junk" in first.message.lower() or created.path in (first.note_id or "")
     assert lib.meta.get(created.path) is not None
 
-    # second pass: confirmation with context referencing the note
-    second = agent_with(
-        lib,
-        {"intent": "delete", "target_ref": created.path, "is_confirmation": True},
-    ).handle("yes", context=f"Delete {created.path}? confirm to proceed.")
+    second = agent.handle_confirm(first.pending_id, approved=True)
     assert second.status == "done" and second.action == "deleted"
     assert lib.meta.get(created.path) is None
 

@@ -148,6 +148,11 @@ def _build_parser() -> argparse.ArgumentParser:
     h.add_argument("request", help="verbatim user request")
     h.add_argument("--context", default=None, help="recent conversation turns (for coreference)")
 
+    cf = sub.add_parser("confirm", help="approve or reject a pending confirmation")
+    cf.add_argument("pending_id", help="id from a prior needs_clarification response")
+    cf.add_argument("--approve", action="store_true", help="execute the pending action")
+    cf.add_argument("--reject", action="store_true", help="cancel the pending action")
+
     q = sub.add_parser("query", help="structured query over the index")
     q.add_argument("--type", default=None)
     q.add_argument("--tag", default=None)
@@ -194,6 +199,30 @@ def _run_handle(lib: Librarian, args) -> int:
     agent = LibrarianAgent(lib, llm)
     res = agent.handle(args.request, context=args.context)
     print(f"[{res.status}] {res.message}")
+    if res.pending_id:
+        print(f"pending: {res.pending_id}", file=sys.stderr)
+    if res.note_id:
+        print(f"note: {res.note_id} | action: {res.action}", file=sys.stderr)
+    return 1 if res.status == "error" else 0
+
+
+def _run_confirm(lib: Librarian, args) -> int:
+    from librarian.agent import LibrarianAgent
+    from librarian.llm.gemini_client import get_llm_client
+
+    if args.approve == args.reject:
+        print("pass exactly one of --approve or --reject", file=sys.stderr)
+        return 1
+
+    try:
+        llm = get_llm_client()
+    except RuntimeError as exc:
+        print(str(exc), file=sys.stderr)
+        return 1
+
+    agent = LibrarianAgent(lib, llm)
+    res = agent.handle_confirm(args.pending_id, approved=args.approve)
+    print(f"[{res.status}] {res.message}")
     if res.note_id:
         print(f"note: {res.note_id} | action: {res.action}", file=sys.stderr)
     return 1 if res.status == "error" else 0
@@ -226,6 +255,9 @@ def main(argv: list[str] | None = None) -> int:
 
         if args.command == "handle":
             return _run_handle(lib, args)
+
+        if args.command == "confirm":
+            return _run_confirm(lib, args)
 
         if args.command == "benchmark":
             return _run_benchmark(lib, args)

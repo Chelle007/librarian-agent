@@ -14,7 +14,8 @@ from __future__ import annotations
 
 import json
 import sqlite3
-from datetime import datetime, timezone
+import uuid
+from datetime import datetime, timedelta, timezone
 from pathlib import Path
 
 _REPO_ROOT = Path(__file__).resolve().parents[2]
@@ -39,6 +40,25 @@ CREATE TABLE IF NOT EXISTS corrections (
     timestamp              TEXT NOT NULL
 );
 CREATE INDEX IF NOT EXISTS idx_corrections_note ON corrections(note_id);
+
+CREATE TABLE IF NOT EXISTS pending_confirmations (
+    id           TEXT PRIMARY KEY,
+    kind         TEXT NOT NULL,
+    intent       TEXT NOT NULL,
+    message      TEXT NOT NULL,
+    created_at   TEXT NOT NULL,
+    expires_at   TEXT NOT NULL,
+    status       TEXT NOT NULL DEFAULT 'pending',
+    note_type    TEXT,
+    target_path  TEXT,
+    fields       TEXT NOT NULL DEFAULT '{}',
+    body         TEXT,
+    link_paths   TEXT NOT NULL DEFAULT '[]',
+    tags         TEXT NOT NULL DEFAULT '[]',
+    links        TEXT NOT NULL DEFAULT '[]',
+    raw_request  TEXT NOT NULL
+);
+CREATE INDEX IF NOT EXISTS idx_pending_status ON pending_confirmations(status);
 """
 
 
@@ -205,6 +225,78 @@ class MetadataStore:
             ).fetchall()
         return [dict(r) for r in rows]
 
+    # ------------------------------------------------------ pending confirms
+    def create_pending(
+        self,
+        *,
+        kind: str,
+        intent: str,
+        message: str,
+        raw_request: str,
+        note_type: str | None = None,
+        target_path: str | None = None,
+        fields: dict | None = None,
+        body: str | None = None,
+        link_paths: list[str] | None = None,
+        tags: list[str] | None = None,
+        links: list[str] | None = None,
+        ttl_seconds: int = 86400,
+    ) -> str:
+        pending_id = uuid.uuid4().hex[:12]
+        now = datetime.now(timezone.utc)
+        self._conn.execute(
+            """
+            INSERT INTO pending_confirmations (
+                id, kind, intent, message, created_at, expires_at, status,
+                note_type, target_path, fields, body, link_paths, tags, links, raw_request
+            ) VALUES (?, ?, ?, ?, ?, ?, 'pending', ?, ?, ?, ?, ?, ?, ?, ?)
+            """,
+            (
+                pending_id,
+                kind,
+                intent,
+                message,
+                now.isoformat(),
+                (now + timedelta(seconds=ttl_seconds)).isoformat(),
+                note_type,
+                target_path,
+                json.dumps(fields or {}, ensure_ascii=False),
+                body,
+                json.dumps(link_paths or []),
+                json.dumps(tags or []),
+                json.dumps(links or []),
+                raw_request,
+            ),
+        )
+        self._conn.commit()
+        return pending_id
+
+    def get_pending(self, pending_id: str) -> dict | None:
+        row = self._conn.execute(
+            "SELECT * FROM pending_confirmations WHERE id = ?", (pending_id,)
+        ).fetchone()
+        if row is None:
+            return None
+        data = _pending_row_to_dict(row)
+        if data["status"] != "pending":
+            return None
+        if datetime.now(timezone.utc) >= _parse_iso(data["expires_at"]):
+            self.settle_pending(pending_id, "expired")
+            return None
+        return data
+
+    def settle_pending(self, pending_id: str, status: str) -> bool:
+        cur = self._conn.execute(
+            """
+            UPDATE pending_confirmations
+            SET status = ?
+            WHERE id = ? AND status = 'pending'
+            """,
+            (status, pending_id),
+        )
+        self._conn.commit()
+        return cur.rowcount > 0
+
     # --------------------------------------------------------------- lifecycle
     def close(self) -> None:
         self._conn.close()
@@ -220,6 +312,19 @@ def _row_to_dict(row: sqlite3.Row) -> dict:
     d = dict(row)
     d["tags"] = json.loads(d.get("tags") or "[]")
     return d
+
+
+def _pending_row_to_dict(row: sqlite3.Row) -> dict:
+    d = dict(row)
+    d["fields"] = json.loads(d.get("fields") or "{}")
+    d["link_paths"] = json.loads(d.get("link_paths") or "[]")
+    d["tags"] = json.loads(d.get("tags") or "[]")
+    d["links"] = json.loads(d.get("links") or "[]")
+    return d
+
+
+def _parse_iso(value: str) -> datetime:
+    return datetime.fromisoformat(value.replace("Z", "+00:00"))
 
 
 def _now_iso() -> str:

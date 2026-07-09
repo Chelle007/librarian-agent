@@ -57,7 +57,6 @@ class Classification:
     is_reaction: bool = False  # explicit /correct_librarian trigger
     actionable: bool = True  # false → router asks before mutating or querying
     clarify_message: str = ""
-    is_confirmation: bool = False  # affirming a pending action described in context
     raw: dict = field(default_factory=dict)
 
 
@@ -120,7 +119,6 @@ class Classifier:
             is_reaction=is_reaction,
             actionable=actionable,
             clarify_message=clarify_message,
-            is_confirmation=bool(data.get("is_confirmation")),
             raw=data,
         )
 
@@ -198,10 +196,6 @@ Return JSON with these keys:
     makes sense if context contained a pending librarian question but does not.
     true when self-contained or context supplies what is needed.
 - "clarify_message": short question for the user when actionable is false (else "")
-- "is_confirmation": true when the user affirms or approves a pending vault action
-    described in the conversation context (delete confirm, conflict override, etc.).
-    Requires context to describe the SPECIFIC pending change — not just a note path.
-    false otherwise.
 {context}
 Request:
 {request}

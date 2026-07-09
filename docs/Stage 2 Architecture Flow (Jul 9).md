@@ -16,7 +16,7 @@ flowchart TB
         HANDLE["handle(raw_request, context)"]
 
         subgraph Classify["1. Classify"]
-            LLM_CLASS["Classifier LLM<br/>intent + mode + fields<br/>actionable + is_confirmation"]
+            LLM_CLASS["Classifier LLM<br/>intent + mode + fields<br/>actionable"]
             HANDLE --> LLM_CLASS
             LLM_CLASS --> ACTIONABLE
             ACTIONABLE{"actionable?"}
@@ -31,48 +31,32 @@ flowchart TB
         ROUTE -->|delete| DELETE["_delete()"]
 
         subgraph Mutate["2. Create / Update path"]
-            RECOVER{"is_confirmation +<br/>pending context?"}
-            RECOVER -->|yes| RECOVER_LLM["recover_pending_mutation LLM<br/>restore note_type, fields, body"]
-            RECOVER_LLM -->|insufficient| CLARIFY_OUT
-            RECOVER -->|no| WRITE_RES
-            RECOVER_LLM -->|sufficient| WRITE_RES
-
             WRITE_RES["resolve_write_target()"]
-            WRITE_RES --> WR1["1. context path<br/>(coreference from prior turn)"]
+            WRITE_RES --> WR1["1. context path"]
             WR1 --> WR2["2. explicit target_ref path"]
-            WR2 --> WR3["3. schema identity<br/>(name, due_date, …)<br/>→ update | clarify | create"]
-            WR3 --> WR4["4. vague reference only<br/>→ semantic search + recency"]
+            WR2 --> WR3["3. schema identity"]
+            WR3 --> WR4["4. vague reference → semantic search"]
 
             WR4 --> WR_ACTION{"action?"}
-            WR_ACTION -->|clarify| TARGET_CONFIRM["format_target_confirm<br/>→ needs_clarification"]
+            WR_ACTION -->|clarify| TARGET_CONFIRM["→ needs_clarification"]
             WR_ACTION -->|create / update| MENTION_GATE
 
-            MENTION_GATE{"_gate_mentions()<br/>vault scan for label"}
-            MENTION_GATE -->|mentions found<br/>not yet confirmed| MENTION_CONFIRM["format_mention_confirm<br/>→ needs_clarification"]
-            MENTION_GATE -->|confirmed or none| APPLY
+            MENTION_GATE{"_gate_mentions()"}
+            MENTION_GATE -->|mentions found| PENDING_M["store pending + pending_id"]
+            MENTION_GATE -->|none| APPLY
 
-            APPLY{"create or update?"}
-            APPLY -->|create| CREATE["_apply_create()"]
-            APPLY -->|update| UPDATE["_apply_update()"]
-
-            CREATE --> EMPTY_GUARD{"fallback note<br/>with no identity?"}
-            EMPTY_GUARD -->|yes| CLARIFY_OUT
-            EMPTY_GUARD -->|no| LINKS_CREATE["apply_links()<br/>merge wikilinks"]
-            LINKS_CREATE --> STAGE1_CREATE
-
-            UPDATE --> PENDING_UPD{"confirming +<br/>no new fields?"}
-            PENDING_UPD -->|yes| RECOVER_UPD["recover_pending_update LLM"]
-            RECOVER_UPD -->|insufficient| CLARIFY_OUT
-            PENDING_UPD -->|no| CONFLICT
-            RECOVER_UPD --> CONFLICT
-
-            CONFLICT{"confirming<br/>pending update?"}
-            CONFLICT -->|no| CONFLICT_LLM["check_update_conflict LLM"]
-            CONFLICT_LLM -->|contradiction| CONFLICT_CONFIRM["→ needs_clarification<br/>Confirm to update anyway"]
-            CONFLICT -->|yes| LINKS_UPDATE
-            CONFLICT_LLM -->|ok| LINKS_UPDATE["apply_links()<br/>merge wikilinks"]
-            LINKS_UPDATE --> STAGE1_UPDATE
+            PENDING_M --> CLARIFY_OUT
+            APPLY --> CREATE or UPDATE
+            CREATE --> STAGE1_CREATE
+            UPDATE --> CONFLICT_LLM["check_update_conflict"]
+            CONFLICT_LLM -->|conflict| PENDING_C["store pending + pending_id"]
+            PENDING_C --> CLARIFY_OUT
+            CONFLICT_LLM -->|ok| STAGE1_UPDATE
         end
+
+        CONFIRM["handle_confirm(pending_id, approved)"]
+        CONFIRM -->|approved| EXEC["execute stored snapshot"]
+        CONFIRM -->|rejected / expired| CLARIFY_OUT
 
         MUTATE --> Mutate
 
@@ -91,11 +75,10 @@ flowchart TB
         end
 
         subgraph DeletePath["4. Delete path"]
-            DELETE --> DEL_RES["resolve_target()<br/>explicit path → semantic cluster → recency"]
+            DELETE --> DEL_RES["resolve_target()"]
             DEL_RES -->|ambiguous| DEL_CLARIFY["→ needs_clarification"]
-            DEL_RES -->|resolved| DEL_CONFIRM{"is_confirmation +<br/>context references path?"}
-            DEL_CONFIRM -->|no| DEL_ASK["→ needs_clarification<br/>Confirm to proceed"]
-            DEL_CONFIRM -->|yes| STAGE1_DELETE
+            DEL_RES -->|resolved| PENDING_D["store pending + pending_id (1h TTL)"]
+            PENDING_D --> CLARIFY_OUT
         end
     end
 
@@ -152,35 +135,33 @@ flowchart TB
 | Layer | Role |
 |---|---|
 | **Entry** | `CLI` / `MCP` / PA chat — PA must relay `context` on follow-up confirms |
-| **Classifier** | One LLM call → intent, fields, `actionable`, `is_confirmation` |
-| **Write resolution** | Schema identity before semantic search |
-| **Gates** | Mention confirm, conflict check, empty-create guard, delete confirm |
-| **Recovery** | `recover_pending_mutation` / `recover_pending_update` for bare `"yes"` turns |
+| **Classifier** | One LLM call → intent, fields, `actionable` |
+| **Pending confirms** | SQLite snapshot + `pending_id`; PA/CLI calls `handle_confirm()` |
+| **Gates** | Mention confirm, conflict check, delete confirm → all return `pending_id` |
 | **Stage 1** | `Librarian` — schema-validated writes, no LLM |
 | **Storage** | Vault files + SQLite metadata + optional vectors |
 
-## Confirm loop (stateless)
-
-The agent has no session store. Every follow-up must include the prior librarian message in `context`.
+## Confirm loop
 
 ```mermaid
 sequenceDiagram
     participant U as User / PA
     participant A as LibrarianAgent
-    participant L as LLM
+    participant DB as pending_confirmations
     participant V as Vault
 
     U->>A: "my bestie is Angeline"
-    A->>L: classify
     A->>V: find_mentions("Angeline")
-    A-->>U: needs_clarification<br/>(mention list + You said: "...")
+    A->>DB: store snapshot
+    A-->>U: needs_clarification + pending_id
 
-    U->>A: "yes" + context
-    A->>L: classify (is_confirmation)
-    A->>L: recover_pending_mutation(context)
+    U->>A: handle_confirm(pending_id, approved=true)
+    A->>DB: load + settle
     A->>V: create contact + merge links
     A-->>U: done · created 👤 contacts/angeline.md
 ```
+
+TTL: 24h default, 1h for delete. Expired IDs return `needs_clarification`.
 
 ## Key modules
 
@@ -193,8 +174,8 @@ sequenceDiagram
 | `librarian/mention_search.py` | Word-boundary vault scan for identity labels |
 | `librarian/link_resolution.py` | Wikilink merge + mention confirm formatting |
 | `librarian/note_preview.py` | One-line note previews for confirm prompts |
-| `librarian/llm/context_gate.py` | `context_references_path` for delete/update confirms |
-| `librarian/llm/pending_update.py` | Recover pending facts from conversation context |
+| `librarian/pending_confirm.py` | TTL constants + `classification_from_pending()` |
+| `librarian/store/metadata_store.py` | `pending_confirmations` table CRUD |
 | `librarian/llm/update_check.py` | LLM conflict detection before updates |
 | `librarian/pipeline.py` | Stage 1 `Librarian` — deterministic vault I/O |
 
@@ -208,3 +189,4 @@ Every `handle()` call returns a `HandleResult`:
 | `message` | Human-readable response (relay back to user on clarify) |
 | `note_id` | Vault path when applicable |
 | `action` | `created` · `updated` · `deleted` · `queried` · `None` |
+| `pending_id` | Set when `status=needs_clarification` and user must approve (for PA buttons / `librarian confirm`) |
