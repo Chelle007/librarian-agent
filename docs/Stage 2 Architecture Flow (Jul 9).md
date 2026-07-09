@@ -6,16 +6,16 @@ How `LibrarianAgent.handle()` routes free text from entry (CLI / MCP / PA) throu
 
 ```mermaid
 flowchart TB
-    subgraph Entry["Entry"]
+    subgraph s4["Entry"]
         CLI["CLI: librarian handle"]
         MCP["MCP: librarian_handle"]
         PA["PA / chat client<br/>(passes context on follow-ups)"]
     end
 
-    subgraph Stage2["Stage 2 — LibrarianAgent (LLM router)"]
+    subgraph s8["Stage 2 — LibrarianAgent (LLM router)"]
         HANDLE["handle(request, context?, pending_id?, approved?)"]
 
-        subgraph Classify["1. Classify"]
+        subgraph s10["1. Classify"]
             LLM_CLASS["Classifier LLM<br/>intent + mode + fields<br/>actionable"]
             HANDLE --> LLM_CLASS
             LLM_CLASS --> ACTIONABLE
@@ -25,12 +25,11 @@ flowchart TB
 
         ACTIONABLE -->|yes| ROUTE{"Route by intent"}
 
-        ROUTE -->|is_reaction +<br/>meta correction| REACTION["log_correction<br/>→ done"]
         ROUTE -->|create / update| MUTATE["_mutate()"]
         ROUTE -->|query| QUERY["_query()"]
         ROUTE -->|delete| DELETE["_delete()"]
 
-        subgraph Mutate["2. Create / Update path"]
+        subgraph s17["2. Create / Update path"]
             WRITE_RES["resolve_write_target()"]
             WRITE_RES --> WR1["1. context path"]
             WR1 --> WR2["2. explicit target_ref path"]
@@ -43,24 +42,25 @@ flowchart TB
 
             MENTION_GATE{"_gate_mentions()"}
             MENTION_GATE -->|mentions found| PENDING_M["store pending + pending_id"]
-            MENTION_GATE -->|none| APPLY
+            MENTION_GATE -->|none| APPLY["APPLY"]
 
             PENDING_M --> CLARIFY_OUT
-            APPLY --> CREATE or UPDATE
-            CREATE --> STAGE1_CREATE
-            UPDATE --> CONFLICT_LLM["check_update_conflict"]
+            APPLY --> CREATE_OR_UPDATE["CREATE or UPDATE"]
+            CREATE_OR_UPDATE --> STAGE1_CREATE
+            CREATE_OR_UPDATE --> CONFLICT_LLM["check_update_conflict"]
             CONFLICT_LLM -->|conflict| PENDING_C["store pending + pending_id"]
             PENDING_C --> CLARIFY_OUT
             CONFLICT_LLM -->|ok| STAGE1_UPDATE
+            STAGE1_UPDATE --> LOG_CORR["log_correction<br/>if is_reaction or conflict"]
         end
 
         CONFIRM["librarian_confirm(pending_id, approved)<br/>or handle(..., pending_id, approved)"]
         CONFIRM -->|approved| EXEC["execute stored snapshot"]
         CONFIRM -->|rejected / expired| CLARIFY_OUT
 
-        MUTATE --> Mutate
+        MUTATE --> s17
 
-        subgraph Query["3. Query path"]
+        subgraph s29["3. Query path"]
             QUERY --> QMODE{"mode?"}
             QMODE -->|exact_lookup| EXACT["ExactLookup<br/>type / tag / keyword / date / aggregate"]
             QMODE -->|semantic| SEM["SemanticRetriever<br/>vector search k=5"]
@@ -74,7 +74,7 @@ flowchart TB
             HYB -->|vectors off| ERR_OUT
         end
 
-        subgraph DeletePath["4. Delete path"]
+        subgraph s37["4. Delete path"]
             DELETE --> DEL_RES["resolve_target()"]
             DEL_RES -->|ambiguous| DEL_CLARIFY["→ needs_clarification"]
             DEL_RES -->|resolved| PENDING_D["store pending + pending_id (1h TTL)"]
@@ -82,13 +82,13 @@ flowchart TB
         end
     end
 
-    subgraph Stage1["Stage 1 — Librarian (deterministic)"]
+    subgraph s41["Stage 1 — Librarian (deterministic)"]
         STAGE1_CREATE["lib.create()<br/>schema validate → VaultIO write → meta index"]
         STAGE1_UPDATE["lib.update()<br/>merge frontmatter + body → reindex"]
         STAGE1_DELETE["lib.delete()<br/>soft-delete → .trash"]
     end
 
-    subgraph Storage["Storage layer"]
+    subgraph s45["Storage layer"]
         VAULT["VaultIO<br/>Obsidian .md files"]
         META["MetadataStore<br/>SQLite index"]
         VEC["VectorStore<br/>chunk embeddings"]
@@ -113,10 +113,10 @@ flowchart TB
     HYB --> META
 
     STAGE1_CREATE --> DONE["done<br/>note_id + action"]
-    STAGE1_UPDATE --> DONE
+    STAGE1_UPDATE --> LOG_CORR
+    LOG_CORR --> DONE
     STAGE1_DELETE --> DONE
     QUERY_OUT --> DONE
-    REACTION --> DONE
     ERR_OUT --> DONE
 
     classDef llm fill:#e8f4fd,stroke:#4a90d9
@@ -124,9 +124,9 @@ flowchart TB
     classDef out fill:#d4edda,stroke:#28a745
     classDef core fill:#f0f0f0,stroke:#666
 
-    class LLM_CLASS,RECOVER_LLM,RECOVER_UPD,CONFLICT_LLM,RAG,GROUND llm
-    class ACTIONABLE,RECOVER,WR_ACTION,MENTION_GATE,EMPTY_GUARD,PENDING_UPD,CONFLICT,DEL_CONFIRM gate
-    class CLARIFY_OUT,TARGET_CONFIRM,MENTION_CONFIRM,CONFLICT_CONFIRM,DEL_CLARIFY,DEL_ASK,DONE,ERR_OUT out
+    class LLM_CLASS,CONFLICT_LLM,RAG,GROUND llm
+    class ACTIONABLE,ROUTE,WR_ACTION,MENTION_GATE,QMODE gate
+    class CLARIFY_OUT,PENDING_M,PENDING_C,PENDING_D,CONFIRM,EXEC,QUERY_OUT,ERR_OUT,DONE out
     class STAGE1_CREATE,STAGE1_UPDATE,STAGE1_DELETE,VAULT,META,VEC,SCHEMA core
 ```
 
@@ -138,6 +138,7 @@ flowchart TB
 | **Classifier** | One LLM call → intent, fields, `actionable` |
 | **Pending confirms** | SQLite snapshot + `pending_id`; `librarian_confirm` or `handle(pending_id, approved)` |
 | **Gates** | Mention confirm, conflict check, delete confirm → all return `pending_id` |
+| **Corrections** | `is_reaction` or approved conflict → `log_correction` after successful write |
 | **Stage 1** | `Librarian` — schema-validated writes, no LLM |
 | **Storage** | Vault files + SQLite metadata + optional vectors |
 

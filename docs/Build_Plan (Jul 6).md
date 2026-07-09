@@ -1,6 +1,6 @@
 # Build Plan
 
-> Last updated: July 2026
+> Last updated: July 9, 2026
 > Status: Active
 > See Architecture.md for full rationale behind each item below.
 
@@ -38,9 +38,9 @@ Vault I/O, schema validation, metadata store, structured queries, CLI test harne
 
 ---
 
-## Stage 2 — Librarian Eval (the portfolio centerpiece)
+## Stage 2 — Librarian Eval (the portfolio centerpiece)  ✅ core done
 
-Full retrieval stack, intent classification, confidence scoring, RAG, groundedness, eval harness. Complete when the Librarian is independently solid and proven correct — PA depends on this being done first.
+Full retrieval stack, intent classification, confidence scoring, RAG, groundedness, eval harness, and `LibrarianAgent` orchestration. Remaining polish items (dedup pre-write, live eval on populated vault) are non-blocking.
 
 **Lock before building:** embedding model + chunking strategy — ✅ **DECIDED**, see `Embedding & Chunking Decision (Jul 7).md`. Summary: `gemini-embedding-2` (multimodal, one vector space for future image embedding; 8192-token input) @ 768-d (L2-normalized), prefix-based asymmetric retrieval (no `task_type` field), `sqlite-vec` `vec0` float32 brute-force KNN, chunk-native schema (whole-note = 1 chunk), Policy v1 = structured types whole-note / freeform split only above ~1000 tokens. (`-001` kept as an A/B fallback in the embed helper.)
 
@@ -51,8 +51,8 @@ Full retrieval stack, intent classification, confidence scoring, RAG, groundedne
 - [x] Pin `sqlite-vec` (pre-v1) + `google-genai` in `requirements.txt`
 - [x] **Vector indexing wired into the write pipeline** — create/update embed + (re)index, delete removes, `reindex` clears + rebuilds vectors from source-of-truth markdown alongside the metadata index. Shared note→embed-text composition (`ingestion/embed_text.py`) so the pipeline and eval harness embed identically.
 - [x] `exact_lookup` module (`retrieval/exact_lookup.py`) — merged keyword + structured, no LLM, template-based response (`retrieval/templates.py`); aggregation sub-flag with strict-count-vs-tag-scan dual-check. (Keyword matches title/slug + tags; freeform-note *content* search is the semantic path's job.)
-- [x] `semantic` module (`retrieval/semantic.py`) — vector search. _RAG generation still pending (separate Generation bullet below)._
-- [x] `hybrid` module (`retrieval/hybrid.py`) — metadata filter narrows candidates, vector search within set (accepts an already-resolved date range). _Temporal-expression extraction is upstream in the classifier; RAG generation pending._
+- [x] `semantic` module (`retrieval/semantic.py`) — vector search + RAG path
+- [x] `hybrid` module (`retrieval/hybrid.py`) — metadata filter narrows candidates, vector search within set (accepts an already-resolved date range). Temporal-expression extraction is upstream in the classifier.
 
 ### Classification & routing  [CORE]
 - [x] ~~Rule-based pre-filter for unambiguous creates~~ — **removed** (typed routing needs the classifier; plain dumps conflicted with empty-create guards).
@@ -67,7 +67,12 @@ Full retrieval stack, intent classification, confidence scoring, RAG, groundedne
 - [x] Groundedness check (`llm/rag.check_groundedness`) — second LLM call verifying the answer against retrieved chunks (rewrites to supported content on fail, fails open on parse error), semantic/hybrid only
 
 ### Orchestration  [CORE]
-- [x] `librarian_handle` entrypoint (`agent.LibrarianAgent.handle`) — classify → route (create / exact_lookup / semantic+hybrid RAG / update / delete) → MCP-contract result (status / message / note_id / action), incl. the `needs_clarification` loop. LLM transport isolated in `llm/gemini_client.py` (real Gemini + `FakeLLMClient`), with per-call token usage captured for the benchmark.
+- [x] `librarian_handle` entrypoint (`agent.LibrarianAgent.handle`) — classify → route (create / exact_lookup / semantic+hybrid RAG / update / delete) → MCP-contract result (`status` / `message` / `note_id` / `action` / `pending_id`), incl. `needs_clarification` + `pending_id` confirm loop. Optional `handle(pending_id, approved)` delegates to `handle_confirm`. LLM transport in `llm/gemini_client.py` (real Gemini + `FakeLLMClient`), per-call token usage for benchmark.
+- [x] Write resolution (`write_resolution.py`) — context path → explicit `target_ref` → schema identity → semantic search; redirects duplicate creates to update
+- [x] Mention gate (`mention_search.py`, `link_resolution.py`) — word-boundary scan; stores pending snapshot + `pending_id` before linking
+- [x] Conflict gate (`llm/update_check.py`) — LLM contradiction check before update; conflict → pending confirm
+- [x] Pending confirmations (`metadata_store.pending_confirmations`, `pending_confirm.py`) — SQLite snapshot + TTL; `handle_confirm` / CLI `confirm`
+- [x] CLI `handle` + `confirm` subcommands for Stage 2 manual testing
 
 ### Eval harness + benchmark  [CORE — highest portfolio ROI]
 - [x] Auto-generated test question script (`eval/harness.py`) — sample N notes, a pluggable generator writes a question per note (avoiding title words), note = gold answer. `GeminiQuestionGenerator` (Flash) for real runs + offline deterministic `KeywordQuestionGenerator` so the harness runs without the API.
@@ -84,7 +89,7 @@ Full retrieval stack, intent classification, confidence scoring, RAG, groundedne
 - [ ] Dedup check pre-write — vector similarity vs existing notes on create, threshold-gated `needs_clarification` on near-dupes
 
 ### Learning over time  [split]
-- [x] **[CORE]** `/correct_librarian` command (or NL equivalent) — classifier sets `is_reaction`; `agent._reaction` logs it against the `corrections` table. (Correction *logging* existed from Stage 1; this is the trigger path.)
+- [x] **[CORE]** Correction logging on write — classifier sets `is_reaction` for pushback; `log_correction` runs after a successful update when `is_reaction` or an approved conflict pending.
 - [ ] ~~PA turn-adjacency tracking~~ — dropped, replaced by explicit trigger above
 
 **Explicitly not in Stage 2:** multi-intent splitting, reranking, GraphRAG/LightRAG, PA wiring, and all [v2] learning items below.
@@ -100,7 +105,7 @@ Hermes PA profile, Telegram gateway, Librarian wired in as an MCP server. Intent
 - [ ] Core reminders (PA-only, no vault) — one-off, recurring, birthday feed-in
 - [ ] Habits — interval-based recurring reminder + snooze loop (PA-side: `frequency` drives the interval, "later" snoozes by `snooze_duration`, re-fires until done or next interval). On "done", update the habit note's stats via the Librarian. **Finalize the "on time" definition here** (leading candidate: on-time = done on the first reminder of the interval, no snooze). Habit *definition + stats storage* already works via the Stage 1 write pipeline; this item is only the PA reminder loop + stat-increment logic.
 - [ ] Vault-related routing — binary classify (vault-related or not) + PA-side message splitting for mixed intents
-- [ ] Wire `librarian_handle` as MCP tool call, including `needs_clarification` multi-turn loop
+- [ ] Wire `librarian_handle` + `librarian_confirm` as MCP tools (stdio server), including `pending_id` button loop
 - [ ] Wire `librarian_query_raw` for system-triggered reads (birthday cron, quiz batch-fetch)
 - [ ] Voice input — transcription → text → normal PA pipeline
 - [ ] Image input — Gemini Flash vision caption → text → normal PA pipeline

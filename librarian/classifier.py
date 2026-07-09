@@ -16,7 +16,6 @@ design (see Architecture, "Intent Classification & Confidence"):
 
 from __future__ import annotations
 
-import re
 from dataclasses import dataclass, field
 
 from librarian.llm.gemini_client import LLMClient, parse_json
@@ -29,17 +28,6 @@ MODES = ("exact_lookup", "semantic", "hybrid")
 CONFIDENCE_THRESHOLD = 0.35
 # A top-1/top-2 similarity gap at or above this reads as an unambiguous winner.
 STRONG_MARGIN = 0.15
-
-_META_CORRECTION = re.compile(
-    r"(/correct_librarian|correct[_ ]the[_ ]librarian|that was wrong|wrong (note )?type|"
-    r"misclassified|should have been (a |an )?)",
-    re.IGNORECASE,
-)
-
-
-def _is_librarian_meta_correction(text: str) -> bool:
-    """True only for feedback about the librarian's routing — not new vault facts."""
-    return bool(_META_CORRECTION.search(text or ""))
 
 
 @dataclass
@@ -54,7 +42,7 @@ class Classification:
     query_text: str | None = None  # search text for query modes
     filters: dict = field(default_factory=dict)  # type/tag/keyword/date/aggregate
     target_ref: str | None = None  # reference phrase for update/delete
-    is_reaction: bool = False  # explicit /correct_librarian trigger
+    is_reaction: bool = False  # user is correcting prior librarian output
     actionable: bool = True  # false → router asks before mutating or querying
     clarify_message: str = ""
     raw: dict = field(default_factory=dict)
@@ -92,9 +80,6 @@ class Classifier:
             mode = "semantic"
 
         is_reaction = bool(data.get("is_reaction"))
-        # New facts ("Desmond is my bf") are updates, not log-only librarian feedback.
-        if is_reaction and not _is_librarian_meta_correction(raw_request):
-            is_reaction = False
 
         note_type = data.get("note_type") or None
         actionable = data.get("actionable", True)
@@ -186,10 +171,9 @@ Return JSON with these keys:
     type, tag, keyword, created_after (YYYY-MM-DD), created_before (YYYY-MM-DD),
     aggregate (true for "how many"). Convert relative times ("last month") to dates.
 - "target_ref": for update/delete, the phrase identifying which note (or null)
-- "is_reaction": true ONLY for meta-feedback about the librarian's mistake
-    (e.g. "/correct_librarian that was a task not a note"). NOT for new facts
-    about vault content — those are intent=update (e.g. "Desmond is my boyfriend"
-    after asking who Desmond is → update the contact, is_reaction=false).
+- "is_reaction": true when the user is correcting or revising prior librarian
+    output — wrong fact, wrong gender/type, "actually…", "/correct_librarian…".
+    false for first-time facts, plain elaboration, greetings, or queries.
 - "actionable": false when the request cannot be executed without more user input
     — e.g. a short reply with no conversation context explaining what to confirm;
     greetings or off-topic chitchat with no vault content; a follow-up that only

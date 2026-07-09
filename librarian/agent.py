@@ -18,9 +18,10 @@ contract (status / message / note_id / action / pending_id) from the Architectur
 
 from __future__ import annotations
 
+import json
 from dataclasses import dataclass
 
-from librarian.classifier import Classification, Classifier, _is_librarian_meta_correction
+from librarian.classifier import Classification, Classifier
 from librarian.link_resolution import apply_links, format_mention_confirm, wikilink_label
 from librarian.mention_search import find_mentions, identity_label
 from librarian.note_preview import format_target_confirm
@@ -84,8 +85,6 @@ class LibrarianAgent:
         if not c.actionable:
             return HandleResult("needs_clarification", c.clarify_message)
 
-        if c.is_reaction and _is_librarian_meta_correction(raw_request):
-            return self._reaction(c, raw_request, context)
         if c.intent in ("create", "update"):
             return self._mutate(c, raw_request, context)
         if c.intent == "query":
@@ -124,6 +123,7 @@ class LibrarianAgent:
                 raw_request,
                 link_paths=link_paths,
                 skip_conflict=True,
+                pending_kind=row["kind"],
             )
         if row["intent"] == "create":
             return self._apply_create(c, raw_request, link_paths=link_paths)
@@ -277,6 +277,7 @@ class LibrarianAgent:
         *,
         link_paths: list[str] | None = None,
         skip_conflict: bool = False,
+        pending_kind: str | None = None,
     ) -> HandleResult:
         note = self.lib.vault.read(path)
         body = c.body
@@ -313,6 +314,13 @@ class LibrarianAgent:
         )
         res = self.lib.update(path, fields=fields or None, body=body)
         if res.ok:
+            if _should_log_correction(c, pending_kind=pending_kind):
+                self._log_correction(
+                    note_id=path,
+                    frontmatter=note.frontmatter,
+                    body=note.body,
+                    corrected_to=raw_request,
+                )
             return HandleResult("done", res.message, note_id=res.note_id, action="updated")
         if res.missing_required:
             needed = ", ".join(res.missing_required)
@@ -398,15 +406,22 @@ class LibrarianAgent:
             ttl_seconds=DELETE_TTL_SECONDS,
         )
 
-    # ---------------------------------------------------------------- reaction
-    def _reaction(self, c: Classification, raw_request: str, context: str | None) -> HandleResult:
-        """Explicit /correct_librarian trigger — log the correction signal."""
+    def _log_correction(
+        self, *, note_id: str, frontmatter: dict, body: str, corrected_to: str
+    ) -> None:
         self.lib.meta.log_correction(
-            note_id=c.target_ref,
-            original_classification=context,
-            corrected_to=raw_request,
+            note_id=note_id,
+            original_classification=_note_snapshot(frontmatter, body),
+            corrected_to=corrected_to,
         )
-        return HandleResult("done", "Got it — logged that correction.", action=None)
+
+
+def _should_log_correction(c: Classification, *, pending_kind: str | None = None) -> bool:
+    return c.is_reaction or pending_kind == "conflict"
+
+
+def _note_snapshot(frontmatter: dict, body: str) -> str:
+    return json.dumps({"frontmatter": frontmatter, "body": body}, ensure_ascii=False)
 
 
 def _clarify_write(wr: WriteResolution, vault) -> str:

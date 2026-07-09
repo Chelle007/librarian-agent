@@ -65,19 +65,34 @@ Code sustainability leads because this is a portfolio piece and a tool the autho
 
 ### Contract
 
+Two MCP tools (Stage 3 wiring; callable from CLI today):
+
+**`librarian_handle`** — anything that originates as user free text:
+
 ```
 librarian_handle(
-  raw_request: string,       // verbatim user text, not PA-paraphrased
-  context: string | null,    // recent conversation turns, for coreference resolution
+  raw_request: string,           // verbatim user text, not PA-paraphrased
+  context: string | null,        // recent conversation turns, for coreference
+  pending_id: string | null,     // optional: resume a pending confirmation
+  approved: bool | null,         // required when pending_id is set
 ) -> {
   status: "done" | "needs_clarification" | "error",
-  message: string,           // result summary, generated answer, or clarifying question
+  message: string,
   note_id: string | null,
-  action: "created" | "updated" | "deleted" | "merged" | "queried" | null
+  action: "created" | "updated" | "deleted" | "queried" | null,
+  pending_id: string | null      // set when user must approve (PA buttons)
 }
 ```
 
-If `status: needs_clarification`, PA relays `message` to the user, gets a reply, and calls `librarian_handle` again with the reply folded into `context`. Genuine multi-turn loop.
+**`librarian_confirm`** — approve/reject a stored pending action (mention link,
+conflict overwrite, delete). Equivalent to `librarian_handle(..., pending_id, approved)`.
+
+When `status: needs_clarification` with a `pending_id`, PA shows the message and
+confirm/cancel buttons, then calls `librarian_confirm` — not a free-text "yes"
+through classification. PA should still relay `context` on normal follow-ups
+(coreference, factual corrections).
+
+Pending snapshots live in SQLite (`pending_confirmations`); TTL 24h default, 1h for delete.
 
 A second tool, `librarian_query_raw(filter)`, is promoted from dev-only harness to a real production tool — used for **system/cron-triggered structured reads** that were never ambiguous in the first place (e.g. birthday-check cron reading a contact's birthday field, flashcard quiz batch-fetching contacts). These are known-structure, non-freeform triggers and shouldn't burn an LLM classification call.
 
@@ -116,6 +131,20 @@ DELETE → target resolution (same mechanism as update)
 ```
 
 Soft delete keeps blast radius low even if target resolution picks the wrong note — recoverable either way.
+
+### Create / update hardening (Stage 2)
+
+Before any vault write from free text:
+
+1. **Write resolution** (`write_resolution.py`) — resolve target in order: conversation
+   context path → explicit `target_ref` → schema identity (same contact name, etc.) →
+   semantic search. Redirects "create" to "update" when identity already exists.
+2. **Mention gate** — if an identity label appears in other vault notes, store a
+   pending snapshot and return `pending_id` (user confirms wikilink merge).
+3. **Conflict gate** — LLM checks whether the proposed update contradicts existing
+   content; contradictions → pending confirm before overwrite.
+4. **Correction logging** — after successful update, log to `corrections` when
+   `is_reaction` or approved conflict pending (see Learning Over Time).
 
 ### Multi-intent (create + update in one message) — deferred
 
@@ -247,8 +276,18 @@ Unchanged — two SQLite-backed stores: vector store (sqlite-vec, embeddings per
 
 New goal identified: system should improve the more the user interacts with it, not just retrieve accurately. Distinct from retrieval quality — this is a stateful learning-over-time concern, addressed with three converging layers, sequenced by data dependency (later layers need data only earlier layers produce):
 
-### 1. Correction logging (Stage 1)
-Every revert/edit-via-reply is currently executed but not recorded as signal. Add a `corrections` table to the metadata store: `original_classification, corrected_to, note_id, timestamp`. Near-zero marginal cost — reuses the existing revert-via-reply write path, just persists the diff instead of discarding it. This is the only layer where the signal is lost forever if not captured at the moment it happens, so it starts in Stage 1 despite Stage 1 otherwise being LLM-free.
+### 1. Correction logging (Stage 1 table, Stage 2 write hook)
+
+`corrections` table in the metadata store: `note_id, original_classification, corrected_to, timestamp`.
+`original_classification` holds a JSON before-snapshot of the note (frontmatter + body).
+
+**Stage 2 behavior:** after a **successful vault update**, log a row when:
+- the classifier sets `is_reaction` (user is correcting/revising prior librarian output), or
+- the user approved a **conflict** pending (overwrite of contradictory content).
+
+Factual corrections (e.g. "desmond is a guy, not a girl") route as `update` and both
+fix the vault and log — there is no log-only shortcut. Casual elaboration (`is_reaction=false`)
+does not log.
 
 ### 2. Preference/pattern synthesis (Stage 2/3)
 Periodic (weekly/monthly) cron pass — same pattern as the existing schema-clustering cron — reads recent high-strength (core/active tier, per Ebbinghaus decay) memories and writes an explicit profile note (inferred preferences, recurring themes). This is what produces the actual "it knows me" feel; correction logging alone doesn't. Requires weeks of accumulated notes + corrections to be worth running — cannot usefully start before real usage exists.
@@ -260,10 +299,13 @@ Once a profile note exists, weight semantic/hybrid search toward it (e.g. boost 
 
 **Relationship inference (GraphRAG-adjacent):** the "connections never explicitly written" gap (see GraphRAG section) is the natural 4th layer here, but stays rejected for the same cost/scale reasons — revisit only after layers 1-3 are running and that specific wall is actually hit.
 
-### PA → Librarian correction signal (mechanism, not a new intent)
-Turn-adjacency (inferring a reaction from message timing) was considered and rejected — too many false positives (an unrelated message right after a vault write would wrongly be treated as reaction context), and still requires Librarian to gracefully handle "this wasn't actually a reaction." **Adopted instead: explicit trigger.** User says `/correct_librarian ...` (or a natural-language equivalent PA pattern-matches on, e.g. "correct the librarian: ...") — PA forwards this verbatim to Librarian as a correction, no ambiguity, no LLM judgment call needed on PA's side, no logging of things the user didn't deliberately flag. Librarian's classification call is extended with a `reaction` tag only in this explicit-trigger case, not on every turn.
+### PA → Librarian correction signal
 
-**Broad reaction logging (casual "oh nice" affirmations) — dropped, not just deferred.** The explicit-trigger approach replaces the need for it: corrections are the signal that matters, and they're now user-initiated and unambiguous rather than inferred.
+Turn-adjacency was considered and rejected (false positives). **Adopted:** classifier
+sets `is_reaction` when the user is pushing back on prior output; the normal mutate
+path runs and `log_correction` fires only after a successful write. No separate
+log-only route. PA forwards correction utterances verbatim with `context` for target
+resolution — no PA-side judgment beyond relaying text.
 
 ### Conversational memory: Hermes built-in vs Honcho
 Hermes ships built-in cross-session memory (MEMORY.md/USER.md) with no extra setup. Honcho is an optional memory provider plugin (external service, honcho.dev) that adds per-turn dialectic reasoning — a deepening model of user preferences/patterns derived from conversation. **Decision: default to Hermes's built-in memory for v1**, skip Honcho — avoids an extra external dependency before it's proven necessary, consistent with the self-hosted/no-lock-in philosophy. Honcho remains a config-only upgrade (`memory: provider: honcho`) to revisit later if built-in memory feels insufficient. Not an architecture-defining choice either way — deferred to a Stage 3 config decision, not a pre-build blocker.
@@ -355,7 +397,7 @@ Log tokens per request (classification + generation + tool overhead), compare to
 3. **Multi-intent handling** (single message, multiple intents) — deferred past v1, approach sketched above.
 4. **Video ingestion** — deferred, stretch-goal tier, no auto-understanding planned for v1.
 5. **Retrieval module collapse (5 conceptual → 3 implementation)** — decided, not yet implemented; verify no behavioral regression when merging keyword+structured code paths.
-6. ~~Reaction logging scope~~ — resolved: dropped in favor of explicit `/correct_librarian` trigger.
+6. ~~Reaction logging scope~~ — resolved: `is_reaction` logs on successful write; broad casual affect still dropped.
 7. **Preference synthesis cadence** — weekly vs monthly cron, and how much accumulated data is "enough" to run it meaningfully — not yet determined, revisit once Stage 1/2 usage data exists.
 8. **Honcho vs Hermes built-in memory** — defaulting to built-in for v1; revisit only if conversational memory proves insufficient in practice.
 9. **LangGraph adoption** — rejected for v1; watchlist of concrete trigger conditions in Agent Frameworks & Orchestration section. Not a timeline-based revisit — only re-evaluate if one of the listed conditions is actually hit.
@@ -378,7 +420,7 @@ Log tokens per request (classification + generation + tool overhead), compare to
 | Agent split | PA (Hermes) + Librarian (custom, Python, from scratch) | PA stays thin; Librarian is the portfolio-relevant engineering |
 | Communication | Direct MCP tool call, synchronous | Lower latency than Kanban; simpler ops for single caller |
 | Librarian transport | MCP over stdio, co-located on VPS | No network exposure needed |
-| Retrieval routing | Combined intent + mode classification, one LLM call; rule-based pre-filter skips LLM for unambiguous creates | Efficiency without sacrificing routing accuracy |
+| Retrieval routing | Combined intent + mode classification, one LLM call; no rule pre-filter (removed — conflicted with typed create guards) | All requests classified; empty-create guards downstream |
 | Retrieval implementation | 5 conceptual paths, collapsed to 3 code modules | Keyword+structured share one non-LLM lookup mechanism; fewer things to build/maintain |
 | Confidence scoring | Heuristic (vector margin + coreference count), not LLM self-report | LLM self-reported confidence clusters near 0.9 regardless of correctness |
 | Delete | New 4th intent, always confirm, soft-delete to `.trash/` | Destructive action needs more friction than create/update/query |
@@ -396,8 +438,8 @@ Log tokens per request (classification + generation + tool overhead), compare to
 | Build order | Librarian Baseline → Librarian Eval → PA | Fast submittable checkpoint; proves correctness before PA depends on it |
 | Image input | Vision caption at PA, then treated as text | Same pattern as voice; keeps Librarian text-only and simple |
 | Video input | Deferred, attachment + caption only | No cheap "understand this video" primitive at budget |
-| Correction logging | Added to Stage 1, new `corrections` table | Signal is lost forever if not captured at the moment of revert; can't backfill later |
-| Reaction logging (broad affect) | Dropped | Replaced by explicit `/correct_librarian` trigger — no ambiguity, no inference needed |
-| PA→Librarian correction signal | Explicit user command (`/correct_librarian`), not adjacency inference | Removes false-positive risk of adjacency guessing; zero PA-side judgment call |
+| Correction logging | `corrections` table; log on successful update when `is_reaction` or approved conflict | Signal captured at moment of fix; vault always updated for factual corrections |
+| Reaction logging (broad affect) | Dropped | "oh nice" affirmations too noisy/ambiguous |
+| PA→Librarian correction signal | Classifier `is_reaction` + normal mutate path | No log-only shortcut; no turn-adjacency inference |
 | Conversational memory provider | Hermes built-in memory (default), Honcho deferred | Avoids extra external dependency before proven necessary; config-only upgrade later if needed |
 | Orchestration approach | Custom Python (both PA and Librarian); no LangChain, LangGraph, or skill-based agent pattern | No multi-provider need, flow is small/fixed-shape, differentiated logic (confidence heuristics, schema validation) has no framework primitive to use; see Agent Frameworks section |

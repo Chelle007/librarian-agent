@@ -148,6 +148,17 @@ def test_handle_update_conflict_asks_confirmation(lib):
     confirmed = agent.handle_confirm(res.pending_id, approved=True)
     assert confirmed.status == "done" and confirmed.action == "updated"
     assert lib.vault.read(created.path).frontmatter["relationship"] == "girlfriend"
+    assert len(lib.meta.get_corrections()) == 1
+
+
+def test_handle_update_without_reaction_does_not_log(lib):
+    created = lib.create(type="contact", fields={"name": "Alex"})
+    agent = agent_with(
+        lib, {"intent": "update", "target_ref": created.path, "fields": {"likes": "tea"}}
+    )
+    res = agent.handle("Alex likes tea")
+    assert res.status == "done" and res.action == "updated"
+    assert len(lib.meta.get_corrections()) == 0
 
 
 def test_expired_pending_needs_clarification(lib):
@@ -206,17 +217,32 @@ def test_handle_pending_id_without_approved_errors(lib):
     assert res.status == "error"
 
 
-# ----------------------------------------------------------------- reaction
-def test_handle_reaction_logs_correction(lib):
-    agent = agent_with(
-        lib, {"intent": "update", "is_reaction": True, "target_ref": "notes/x.md"}
+# ------------------------------------------------------------- correction
+def test_correction_updates_vault_and_logs(lib):
+    created = lib.create(
+        type="contact",
+        fields={"name": "Desmond", "relationship": "girlfriend"},
+        body="She is my friend.",
     )
-    res = agent.handle("correct the librarian: that was a task, not a note")
-    assert res.status == "done"
+    agent = agent_with(
+        lib,
+        {
+            "intent": "update",
+            "is_reaction": True,
+            "target_ref": created.path,
+            "fields": {"relationship": "friend"},
+            "body": "He is a guy, not a girl.",
+        },
+    )
+    res = agent.handle("nonono desmond is a guy, not a girl")
+    assert res.status == "done" and res.action == "updated"
     assert len(lib.meta.get_corrections()) == 1
+    assert lib.meta.get_corrections()[0]["note_id"] == created.path
+    note = lib.vault.read(created.path)
+    assert note.frontmatter.get("relationship") == "friend"
 
 
-def test_factual_followup_updates_note_not_log(lib):
+def test_factual_correction_updates_and_logs(lib):
     created = lib.create(type="contact", fields={"name": "Desmond"}, body="Friend group.")
     agent = agent_with(
         lib,
@@ -224,6 +250,7 @@ def test_factual_followup_updates_note_not_log(lib):
             "intent": "update",
             "target_ref": "Desmond",
             "fields": {"relationship": "boyfriend"},
+            "is_reaction": True,
         },
     )
     res = agent.handle(
@@ -231,7 +258,7 @@ def test_factual_followup_updates_note_not_log(lib):
         context="User asked who Desmond is. Librarian answered from contacts/desmond.md",
     )
     assert res.status == "done" and res.action == "updated"
-    assert len(lib.meta.get_corrections()) == 0
+    assert len(lib.meta.get_corrections()) == 1
     note = lib.vault.read(created.path)
     assert note.frontmatter.get("relationship") == "boyfriend"
 

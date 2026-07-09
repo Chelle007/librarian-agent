@@ -1,7 +1,7 @@
 # Embedding Model & Chunking — Locked Decision
 
-> Last updated: July 2026
-> Status: Decided (Stage 2 gate) — lock before building the vector store
+> Last updated: July 9, 2026
+> Status: Implemented — see `librarian/llm/embeddings.py`, `store/vector_store.py`, `ingestion/chunker.py`
 > North star reminder: code sustainability > accuracy = token efficiency = latency
 
 This is the one Stage 2 decision that's expensive to change: the embedding model, its output dimensions, and the chunking granularity all get baked into every stored vector. Changing the **model or dimensions later requires re-embedding the whole vault**; changing **chunking** requires re-embedding too. This doc locks all three, and — importantly — designs the storage so a *chunking* change never needs a schema migration, only a re-embed.

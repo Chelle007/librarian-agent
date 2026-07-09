@@ -14,7 +14,7 @@ Building a personal AI assistant using Hermes Agent + Obsidian as the knowledge 
 - Interface: Telegram bot (primary)
 - Voice: Telegram voice message → transcribed → handled as text input
 - Hosting: Hetzner CX22 VPS (~$4.59/mo, no lock-in)
-- Obsidian sync to VPS: TBD (git or Obsidian Sync)
+- Obsidian sync to VPS: git (obsidian-git on desktop + VPS auto-commit/pull)
  
 **Use Cases**
  
@@ -55,11 +55,20 @@ Building a personal AI assistant using Hermes Agent + Obsidian as the knowledge 
 - VPS: Hetzner CX22 over Hostinger (flat pricing, no lock-in, same specs)
 - Obsidian integration: direct file I/O on the markdown vault + git sync (superseded earlier Local REST API + MCP plan — no live Obsidian instance on the headless VPS to talk to)
  
+**Build progress (July 2026)**
+
+| Stage | Status |
+|---|---|
+| Stage 1 — Librarian baseline (vault I/O, schema, CLI) | Done |
+| Stage 2 — Retrieval, classification, agent, eval/benchmark | Core done |
+| Stage 3 — Hermes PA, Telegram, MCP server | Not started |
+
 **Next Steps**
-- [ ] Design system architecture
+- [x] Design system architecture → `docs/Architecture (7 July).md`
+- [x] Librarian Stage 1 + Stage 2 core (`librarian-agent` repo)
 - [ ] Set up Hetzner VPS
 - [ ] Install Hermes Agent
 - [ ] Connect Gemini Flash as LLM
-- [ ] Point Librarian at the vault folder (direct file I/O) + set up git sync
+- [ ] Package Librarian as MCP server (`librarian_handle`, `librarian_confirm`, `librarian_query_raw`)
 - [ ] Connect Telegram bot
-- [ ] Build features one by one starting from core
+- [ ] Build PA features (reminders, habits, CRM) on top of Librarian tools
