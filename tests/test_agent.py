@@ -24,9 +24,6 @@ def make_llm(
     revised: str = "",
     conflict: bool = False,
     conflict_message: str = "",
-    assess_actionable: bool | None = None,
-    assess_message: str = "",
-    assess_confirmation: bool = False,
     pending_sufficient: bool = True,
     pending_message: str = "",
     pending_fields: dict | None = None,
@@ -39,13 +36,6 @@ def make_llm(
     classify_json = json.dumps(payload)
     ground_json = json.dumps({"grounded": grounded, "revised": revised})
     conflict_json = json.dumps({"conflict": conflict, "message": conflict_message})
-    assess_json = json.dumps(
-        {
-            "actionable": True if assess_actionable is None else assess_actionable,
-            "message": assess_message,
-            "is_confirmation": assess_confirmation,
-        }
-    )
     pending_json = json.dumps(
         {
             "sufficient": pending_sufficient,
@@ -67,8 +57,6 @@ def make_llm(
     def handler(prompt, system, response_json):
         if "Classify the request" in prompt:
             return classify_json
-        if "enough context to execute" in prompt:
-            return assess_json
         if "UPDATE to an existing note" in prompt:
             return pending_json
         if "CREATE or UPDATE" in prompt:
@@ -324,18 +312,6 @@ def test_ambiguous_target_suggests_best_guess(lib):
     assert "Alex" in res.message
     assert "Confirm" in res.message
     assert res.note_id == school
-
-
-def test_prefilter_chitchat_needs_clarification(lib):
-    llm = make_llm(
-        {},
-        assess_actionable=False,
-        assess_message="That doesn't look like something to save in the vault.",
-    )
-    agent = LibrarianAgent(lib, llm, use_prefilter=True)
-    res = agent.handle("hello")
-    assert res.status == "needs_clarification"
-    assert res.action is None
 
 
 # -------------------------------------------------------------- vectors off

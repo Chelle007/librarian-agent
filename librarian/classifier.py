@@ -8,9 +8,6 @@ design (see Architecture, "Intent Classification & Confidence"):
   everything the router needs downstream (note type + fields for creates,
   extracted filters + query text for queries, a target reference for
   update/delete, suggested wikilinks, and a correction flag).
-- **A rule-based pre-filter** short-circuits the most unambiguous creates so they
-  never spend an LLM call — a token-efficiency discipline, applied conservatively
-  so it never mis-routes a query/update/delete into a create.
 - **Confidence is a heuristic, not an LLM self-report.** Self-reported confidence
   was found to cluster near 0.9 regardless of correctness, so it's computed here
   from two cheap deterministic signals: the vector margin (top-1 vs top-2 gap)
@@ -33,17 +30,6 @@ CONFIDENCE_THRESHOLD = 0.35
 # A top-1/top-2 similarity gap at or above this reads as an unambiguous winner.
 STRONG_MARGIN = 0.15
 
-_INTERROGATIVES = re.compile(
-    r"\b(what|when|where|who|whom|which|how|why|list|show|find|search|count|"
-    r"how many|do i|did i|have i|is there|are there)\b",
-    re.IGNORECASE,
-)
-_MUTATION_VERBS = re.compile(
-    r"\b(update|change|edit|set|rename|delete|remove|drop|trash|rate|correct)\b",
-    re.IGNORECASE,
-)
-# Reference words hinting the request points at an *existing* note (update/delete).
-_REFERENCES = re.compile(r"\b(it|that|this|those|these|the last|my)\b", re.IGNORECASE)
 _META_CORRECTION = re.compile(
     r"(/correct_librarian|correct[_ ]the[_ ]librarian|that was wrong|wrong (note )?type|"
     r"misclassified|should have been (a |an )?)",
@@ -72,42 +58,17 @@ class Classification:
     actionable: bool = True  # false → router asks before mutating or querying
     clarify_message: str = ""
     is_confirmation: bool = False  # affirming a pending action described in context
-    source: str = "llm"  # "llm" | "prefilter"
     raw: dict = field(default_factory=dict)
-
-
-def rule_prefilter(text: str) -> Classification | None:
-    """Cheap, conservative create detector — returns None to defer to the LLM.
-
-    Only fires when the text carries *no* interrogative, *no* mutation verb, and
-    *no* reference to an existing note. Those are new-information dumps ("cleaned
-    the garage today", "idea: batch the embed calls") that are unambiguously
-    creates. Anything with a whiff of query/update/delete falls through to the
-    LLM, so this saves tokens without ever risking a mis-route.
-    """
-    t = (text or "").strip()
-    if not t or "?" in t:
-        return None
-    if _INTERROGATIVES.search(t) or _MUTATION_VERBS.search(t) or _REFERENCES.search(t):
-        return None
-    # Unambiguous create: type resolves later via schema (defaults to note).
-    return Classification(intent="create", note_type=None, body=t, source="prefilter")
 
 
 class Classifier:
     """Wraps the single combined-classification LLM call."""
 
-    def __init__(self, llm: LLMClient, schema: Schema, *, use_prefilter: bool = True):
+    def __init__(self, llm: LLMClient, schema: Schema):
         self.llm = llm
         self.schema = schema
-        self.use_prefilter = use_prefilter
 
     def classify(self, raw_request: str, context: str | None = None) -> Classification:
-        if self.use_prefilter:
-            pre = rule_prefilter(raw_request)
-            if pre is not None:
-                return pre
-
         prompt = self._build_prompt(raw_request, context)
         try:
             data = parse_json(self.llm.generate(prompt, system=_SYSTEM, response_json=True))
@@ -160,7 +121,6 @@ class Classifier:
             actionable=actionable,
             clarify_message=clarify_message,
             is_confirmation=bool(data.get("is_confirmation")),
-            source="llm",
             raw=data,
         )
 

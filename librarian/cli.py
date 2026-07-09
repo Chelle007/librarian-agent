@@ -147,7 +147,6 @@ def _build_parser() -> argparse.ArgumentParser:
     h = sub.add_parser("handle", help="route a free-text request through the full LLM pipeline")
     h.add_argument("request", help="verbatim user request")
     h.add_argument("--context", default=None, help="recent conversation turns (for coreference)")
-    h.add_argument("--no-prefilter", action="store_true", help="disable the rule-based create pre-filter")
 
     q = sub.add_parser("query", help="structured query over the index")
     q.add_argument("--type", default=None)
@@ -192,7 +191,7 @@ def _run_handle(lib: Librarian, args) -> int:
         print(str(exc), file=sys.stderr)
         return 1
 
-    agent = LibrarianAgent(lib, llm, use_prefilter=not args.no_prefilter)
+    agent = LibrarianAgent(lib, llm)
     res = agent.handle(args.request, context=args.context)
     print(f"[{res.status}] {res.message}")
     if res.note_id:

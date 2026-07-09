@@ -1,4 +1,4 @@
-"""Tests for the classifier: rule pre-filter, LLM parse, confidence heuristics."""
+"""Tests for the classifier: LLM parse and confidence heuristics."""
 
 from __future__ import annotations
 
@@ -13,7 +13,6 @@ from librarian.classifier import (
     confidence_from_candidates,
     confidence_from_margin,
     is_confident,
-    rule_prefilter,
     vector_margin,
 )
 from librarian.llm.gemini_client import FakeLLMClient
@@ -30,28 +29,6 @@ def schema():
     return Schema.load()  # packaged template
 
 
-# --------------------------------------------------------------- pre-filter
-def test_prefilter_fires_on_plain_statement():
-    c = rule_prefilter("cleaned the garage today")
-    assert c is not None and c.intent == "create"
-    assert c.source == "prefilter"
-    assert c.body == "cleaned the garage today"
-
-
-def test_prefilter_defers_on_question():
-    assert rule_prefilter("what did I do last week?") is None
-
-
-def test_prefilter_defers_on_mutation_verb():
-    assert rule_prefilter("delete the grocery note") is None
-    assert rule_prefilter("update my address") is None
-
-
-def test_prefilter_defers_on_reference_word():
-    assert rule_prefilter("rate that 5 stars") is None  # 'that' + 'rate'
-
-
-# ------------------------------------------------------------------ LLM path
 def test_classify_parses_llm_json(schema):
     payload = {
         "intent": "query",
@@ -67,23 +44,15 @@ def test_classify_parses_llm_json(schema):
 
 
 def test_classify_unknown_intent_falls_back_to_query(schema):
-    # use_prefilter=False so the input reaches the LLM path under test
     llm = FakeLLMClient(responses=['{"intent": "banana"}'])
-    c = Classifier(llm, schema, use_prefilter=False).classify("hmm")
+    c = Classifier(llm, schema).classify("hmm")
     assert c.intent == "query"  # safest fallback: read, don't mutate
 
 
 def test_classify_unparseable_is_ambiguous_query(schema):
     llm = FakeLLMClient(responses=["totally not json"])
-    c = Classifier(llm, schema, use_prefilter=False).classify("weird input")
+    c = Classifier(llm, schema).classify("weird input")
     assert c.intent == "query" and c.mode == "semantic"
-
-
-def test_classify_prefilter_skips_llm(schema):
-    llm = FakeLLMClient(responses=['{"intent": "delete"}'])  # should NOT be consumed
-    c = Classifier(llm, schema, use_prefilter=True).classify("watered the plants")
-    assert c.intent == "create"
-    assert llm.calls == []  # LLM never called
 
 
 def test_classify_actionable_false(schema):
@@ -98,7 +67,7 @@ def test_classify_actionable_false(schema):
             )
         ]
     )
-    c = Classifier(llm, schema, use_prefilter=False).classify("yes")
+    c = Classifier(llm, schema).classify("yes")
     assert not c.actionable
     assert "save" in c.clarify_message.lower()
 

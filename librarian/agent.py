@@ -27,7 +27,7 @@ from librarian.link_resolution import (
     mentions_confirmed,
     wikilink_label,
 )
-from librarian.llm.context_gate import assess_context, context_references_path
+from librarian.llm.context_gate import context_references_path
 from librarian.llm.gemini_client import LLMClient
 from librarian.llm.pending_update import (
     apply_pending_mutation,
@@ -57,15 +57,10 @@ class HandleResult:
 
 
 class LibrarianAgent:
-    def __init__(self, librarian: Librarian, llm: LLMClient, *, use_prefilter: bool = False):
-        # use_prefilter defaults OFF: the rule pre-filter can only emit a
-        # fallback-type `note` (type detection needs the LLM), so firing it on a
-        # typed create would mis-route a contact/task into notes/. Per the north
-        # star (token efficiency is never traded against correctness), it's an
-        # explicit opt-in, not the default.
+    def __init__(self, librarian: Librarian, llm: LLMClient):
         self.lib = librarian
         self.llm = llm
-        self.classifier = Classifier(llm, librarian.schema, use_prefilter=use_prefilter)
+        self.classifier = Classifier(llm, librarian.schema)
         self.exact = ExactLookup(librarian.meta, librarian.vault)
         # Semantic/hybrid need the vector store; absent it, those paths error out
         # cleanly instead of pretending to search.
@@ -80,7 +75,6 @@ class LibrarianAgent:
     # ------------------------------------------------------------------- entry
     def handle(self, raw_request: str, context: str | None = None) -> HandleResult:
         c = self.classifier.classify(raw_request, context)
-        c = self._ensure_actionable(c, raw_request, context)
         if not c.actionable:
             return HandleResult("needs_clarification", c.clarify_message)
 
@@ -93,24 +87,6 @@ class LibrarianAgent:
         if c.intent == "delete":
             return self._delete(c, raw_request, context)
         return HandleResult("error", "I couldn't understand that request.")
-
-    def _ensure_actionable(
-        self, c: Classification, raw_request: str, context: str | None
-    ) -> Classification:
-        """Prefilter skips the classifier LLM — run the shared context gate."""
-        if c.source != "prefilter":
-            return c
-        assessment = assess_context(
-            self.llm,
-            request=raw_request,
-            context=context,
-            intent=c.intent,
-            target_ref=c.target_ref,
-        )
-        c.actionable = assessment.actionable
-        c.clarify_message = assessment.message
-        c.is_confirmation = assessment.is_confirmation
-        return c
 
     # ----------------------------------------------------------- create/update
     def _mutate(self, c: Classification, raw_request: str, context: str | None) -> HandleResult:

@@ -55,7 +55,7 @@ Full retrieval stack, intent classification, confidence scoring, RAG, groundedne
 - [x] `hybrid` module (`retrieval/hybrid.py`) — metadata filter narrows candidates, vector search within set (accepts an already-resolved date range). _Temporal-expression extraction is upstream in the classifier; RAG generation pending._
 
 ### Classification & routing  [CORE]
-- [x] Rule-based pre-filter for unambiguous creates (`classifier.rule_prefilter`). _Built, but default **OFF** in `LibrarianAgent`: it can only emit a fallback-type `note` (type detection needs the LLM), so firing it on a typed create would mis-route it — per the north star, token efficiency isn't traded against correctness. Opt-in via `use_prefilter=True` (or `--no-prefilter` to force off in the CLI)._
+- [x] ~~Rule-based pre-filter for unambiguous creates~~ — **removed** (typed routing needs the classifier; plain dumps conflicted with empty-create guards).
 - [x] Combined LLM classification call — intent + retrieval mode + fields/filters/target/links, one call (`classifier.py`, JSON output, offline-testable via `FakeLLMClient`)
 - [x] Confidence heuristics (`classifier.py`) — `vector_margin` (top-1/top-2 gap) + `confidence_from_candidates` (target-candidate count), NOT LLM self-reported. Vector-margin applies only where vector search runs; update/delete target resolution is guarded by candidate-count.
 - [~] Confidence threshold tuning against real/synthetic test cases — _thresholds live as constants (`CONFIDENCE_THRESHOLD`, `STRONG_MARGIN`); tuning needs a real case set._
