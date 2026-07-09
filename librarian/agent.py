@@ -64,7 +64,22 @@ class LibrarianAgent:
             )
 
     # ------------------------------------------------------------------- entry
-    def handle(self, raw_request: str, context: str | None = None) -> HandleResult:
+    def handle(
+        self,
+        raw_request: str,
+        context: str | None = None,
+        *,
+        pending_id: str | None = None,
+        approved: bool | None = None,
+    ) -> HandleResult:
+        if pending_id is not None:
+            if approved is None:
+                return HandleResult(
+                    "error",
+                    "pending_id requires approved=true or approved=false.",
+                )
+            return self.handle_confirm(pending_id, approved=approved)
+
         c = self.classifier.classify(raw_request, context)
         if not c.actionable:
             return HandleResult("needs_clarification", c.clarify_message)
@@ -80,6 +95,7 @@ class LibrarianAgent:
         return HandleResult("error", "I couldn't understand that request.")
 
     def handle_confirm(self, pending_id: str, *, approved: bool) -> HandleResult:
+        """Execute or cancel a stored pending confirmation (also via handle(pending_id=…))."""
         row = self.lib.meta.get_pending(pending_id)
         if row is None:
             return HandleResult(

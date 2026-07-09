@@ -13,7 +13,7 @@ flowchart TB
     end
 
     subgraph Stage2["Stage 2 — LibrarianAgent (LLM router)"]
-        HANDLE["handle(raw_request, context)"]
+        HANDLE["handle(request, context?, pending_id?, approved?)"]
 
         subgraph Classify["1. Classify"]
             LLM_CLASS["Classifier LLM<br/>intent + mode + fields<br/>actionable"]
@@ -54,7 +54,7 @@ flowchart TB
             CONFLICT_LLM -->|ok| STAGE1_UPDATE
         end
 
-        CONFIRM["handle_confirm(pending_id, approved)"]
+        CONFIRM["librarian_confirm(pending_id, approved)<br/>or handle(..., pending_id, approved)"]
         CONFIRM -->|approved| EXEC["execute stored snapshot"]
         CONFIRM -->|rejected / expired| CLARIFY_OUT
 
@@ -136,7 +136,7 @@ flowchart TB
 |---|---|
 | **Entry** | `CLI` / `MCP` / PA chat — PA must relay `context` on follow-up confirms |
 | **Classifier** | One LLM call → intent, fields, `actionable` |
-| **Pending confirms** | SQLite snapshot + `pending_id`; PA/CLI calls `handle_confirm()` |
+| **Pending confirms** | SQLite snapshot + `pending_id`; `librarian_confirm` or `handle(pending_id, approved)` |
 | **Gates** | Mention confirm, conflict check, delete confirm → all return `pending_id` |
 | **Stage 1** | `Librarian` — schema-validated writes, no LLM |
 | **Storage** | Vault files + SQLite metadata + optional vectors |
@@ -155,7 +155,7 @@ sequenceDiagram
     A->>DB: store snapshot
     A-->>U: needs_clarification + pending_id
 
-    U->>A: handle_confirm(pending_id, approved=true)
+    U->>A: librarian_confirm(pending_id, approved=true)
     A->>DB: load + settle
     A->>V: create contact + merge links
     A-->>U: done · created 👤 contacts/angeline.md

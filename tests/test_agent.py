@@ -187,9 +187,23 @@ def test_handle_delete_confirms_then_deletes(lib):
     assert "junk" in first.message.lower() or created.path in (first.note_id or "")
     assert lib.meta.get(created.path) is not None
 
-    second = agent.handle_confirm(first.pending_id, approved=True)
+    second = agent.handle("", pending_id=first.pending_id, approved=True)
     assert second.status == "done" and second.action == "deleted"
     assert lib.meta.get(created.path) is None
+
+
+def test_handle_pending_id_delegates_to_confirm(lib):
+    created = lib.create(type="note", body="junk", raw_text="x")
+    agent = agent_with(lib, {"intent": "delete", "target_ref": created.path})
+    gate = agent.handle("delete it")
+    res = agent.handle("yes", pending_id=gate.pending_id, approved=True)
+    assert res.status == "done" and res.action == "deleted"
+
+
+def test_handle_pending_id_without_approved_errors(lib):
+    agent = agent_with(lib, {"intent": "create", "fields": {"name": "X"}})
+    res = agent.handle("yes", pending_id="deadbeef1234", approved=None)
+    assert res.status == "error"
 
 
 # ----------------------------------------------------------------- reaction
