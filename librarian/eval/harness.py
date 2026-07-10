@@ -107,7 +107,7 @@ class GeminiQuestionGenerator:
         "Title: {title}\n\n{content}"
     )
 
-    def __init__(self, api_key: str | None = None, model: str = "gemini-flash-latest"):
+    def __init__(self, api_key: str | None = None, model: str = "gemini-3.5-flash"):
         try:
             from google import genai  # noqa: PLC0415 (lazy by design)
         except ImportError as exc:  # pragma: no cover - env-dependent

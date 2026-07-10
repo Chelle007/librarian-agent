@@ -58,7 +58,6 @@ Full retrieval stack, intent classification, confidence scoring, RAG, groundedne
 - [x] ~~Rule-based pre-filter for unambiguous creates~~ — **removed** (typed routing needs the classifier; plain dumps conflicted with empty-create guards).
 - [x] Combined LLM classification call — intent + retrieval mode + fields/filters/target/links, one call (`classifier.py`, JSON output, offline-testable via `FakeLLMClient`)
 - [x] Confidence heuristics (`classifier.py`) — `vector_margin` (top-1/top-2 gap) + `confidence_from_candidates` (target-candidate count), NOT LLM self-reported. Vector-margin applies only where vector search runs; update/delete target resolution is guarded by candidate-count.
-- [~] Confidence threshold tuning against real/synthetic test cases — _thresholds live as constants (`CONFIDENCE_THRESHOLD`, `STRONG_MARGIN`); tuning needs a real case set._
 - [x] Delete intent — target resolution + **mandatory confirm** (regardless of confidence) + soft-delete on affirmative (`agent._delete`)
 - [x] Target resolution module (`target_resolution.py`) — explicit path → semantic search + context → recency tie-break → candidate-count confidence, shared by update and delete
 
@@ -77,7 +76,7 @@ Full retrieval stack, intent classification, confidence scoring, RAG, groundedne
 ### Eval harness + benchmark  [CORE — highest portfolio ROI]
 - [x] Auto-generated test question script (`eval/harness.py`) — sample N notes, a pluggable generator writes a question per note (avoiding title words), note = gold answer. `GeminiQuestionGenerator` (Flash) for real runs + offline deterministic `KeywordQuestionGenerator` so the harness runs without the API.
 - [x] Scoring — recall@k + MRR / whether gold note lands in top-k; works against any retriever with `.search(query, k)` (semantic or hybrid). Wired into the CLI: `python -m librarian.cli eval --path {semantic,hybrid} -k N`.
-- [~] Run against 15-20+ auto-generated cases, plus the Stage 1 smoke tests re-run through the full pipeline — _harness + CLI ready; a real multi-note run pending a populated vault._
+- [x] Run against 15-20+ auto-generated cases — live vault run (Jul 10, 2026): **hybrid** recall@5=100% (20/20), MRR=0.963; **semantic** recall@5=100% (20/20), MRR=1.000 (`--generator gemini -n 20 -k 5 --seed 0`).
 - [x] Log tokens per request, per path — `benchmark/tokens.py`: `TokenTracker` + `MeteredLLMClient` buckets every LLM call by phase (classify / generation / groundedness). Real `usage_metadata` from Gemini when available, chars/4 estimate offline.
 - [x] **Token A/B benchmark** (`benchmark/ab.py`) — 10 representative requests across create/update/delete/exact/semantic/hybrid. **Arm A** = full `LibrarianAgent` (classify → structured/RAG). **Arm B** = passthrough model (one in-context call over the whole vault). Report: per-request tokens, totals, B/A ratio, Arm A phase concentration, avg by kind. CLI: `python -m librarian.cli benchmark [--arms A,B] [--no-seed]`. _Live numbers need a real Gemini key; offline harness is tested._
 
@@ -86,7 +85,8 @@ Full retrieval stack, intent classification, confidence scoring, RAG, groundedne
 
 ### Polish (ship after core paths work)  [CORE-ish, not blocking]
 - [x] Aggregation sub-flag on `exact_lookup` — dual-check (strict count + tag scan) + discrepancy surfacing (`exact_lookup._aggregate` + `templates.render_aggregation`)
-- [ ] Dedup check pre-write — vector similarity vs existing notes on create, threshold-gated `needs_clarification` on near-dupes
+- [ ] ~~Dedup check pre-write~~ — moved to Stage 3
+- [ ] ~~Confidence threshold tuning~~ — moved to Stage 3 (defaults fine until real friction)
 
 ### Learning over time  [split]
 - [x] **[CORE]** Correction logging on write — classifier sets `is_reaction` for pushback; `log_correction` runs after a successful update when `is_reaction` or an approved conflict pending.
@@ -107,6 +107,8 @@ Hermes PA profile, Telegram gateway, Librarian wired in as an MCP server. Intent
 - [ ] Vault-related routing — binary classify (vault-related or not) + PA-side message splitting for mixed intents
 - [ ] Wire `librarian_handle` + `librarian_confirm` as MCP tools (stdio server), including `pending_id` button loop
 - [ ] Wire `librarian_query_raw` for system-triggered reads (birthday cron, quiz batch-fetch)
+- [ ] Dedup check pre-write — vector similarity vs existing notes on create, threshold-gated `needs_clarification` on near-dupes
+- [ ] Confidence threshold tuning against real usage (`CONFIDENCE_THRESHOLD`, `STRONG_MARGIN`) — only if clarify prompts feel too chatty or too silent
 - [ ] Voice input — transcription → text → normal PA pipeline
 - [ ] Image input — Gemini Flash vision caption → text → normal PA pipeline
 - [ ] Idempotency on PA retry (prevent double-create on retried calls)

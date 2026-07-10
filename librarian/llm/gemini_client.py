@@ -20,7 +20,7 @@ import re
 from typing import Callable, Protocol, runtime_checkable
 
 # Gemini Flash per the architecture's hard model constraint (no Pro upgrade).
-GEMINI_FLASH_MODEL = "gemini-flash-latest"
+GEMINI_FLASH_MODEL = "gemini-3.5-flash"
 
 _JSON_FENCE_RE = re.compile(r"^```(?:json)?\s*|\s*```$", re.MULTILINE)
 

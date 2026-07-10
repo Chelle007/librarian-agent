@@ -340,6 +340,15 @@ Adopted pattern (also used by `obsidian-second-brain`):
 
 Self-updating eval set that grows with the vault, rather than a fixed hand-written 15–20 cases. Doubles as both correctness proof and portfolio material ("built a retrieval eval harness that bootstraps its own test cases from the corpus").
 
+**Live run (Jul 10, 2026)** — real vault (~108 notes), Gemini question generator, `n=20`, `k=5`, `seed=0`:
+
+| Path | recall@5 | MRR |
+|---|---|---|
+| semantic | 100% (20/20) | 1.000 |
+| hybrid | 100% (20/20) | 0.963 |
+
+Both paths retrieved the gold note in top-5 for every case; semantic ranked all at #1. Hybrid’s only soft miss was one note at rank 4.
+
 ---
 
 ## Build Order

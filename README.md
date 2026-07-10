@@ -12,7 +12,7 @@ Obsidian instance or REST API required. Desktop and VPS stay in sync via git.
 | Stage | Scope | Status |
 |---|---|---|
 | **1 — Baseline** | Vault I/O, schema validation, SQLite index, CLI | Done |
-| **2 — Eval** | Classification, retrieval, RAG, agent orchestration, eval/benchmark | Core done |
+| **2 — Eval** | Classification, retrieval, RAG, agent orchestration, eval/benchmark | Core done (live eval: semantic/hybrid recall@5=100% on 20 vault cases) |
 | **3 — PA** | Hermes, Telegram, MCP server wiring | Not started |
 
 190 pytest tests. Stage 2 is usable via `librarian handle` / `librarian confirm`
